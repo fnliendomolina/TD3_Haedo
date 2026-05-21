@@ -1,0 +1,137 @@
+     1                                  ;*******************************************************
+     2                                  ;Ejemplo3
+     3                                  ;-Carga gdt (2 segmentos de datos y 1 segmento de codigo)
+     4                                  ;-Entra a modo protegido
+     5                                  ;-Carga en cs el segmento de codigo
+     6                                  ;-Carga en ds el segmento de datos de video
+     7                                  ;-cambio el color de la pantalla
+     8                                  ;-Sale de modo protegido
+     9                                  ;*******************************************************
+    10                                  ;codigo 16 bits
+    11                                  use16
+    12                                  
+    13                                  ;offset del codigo en 0x8000
+    14                                  org 8000h
+    15                                  
+    16                                  ;voy a inicio (salteo variables)
+    17 00000000 EB26                    jmp inicio
+    18                                  
+    19                                  ;***********************************
+    20                                  ;	variables
+    21                                  ;***********************************
+    22 00000002 <res 00000006>          gdtr	resb	6
+    22          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    23                                  
+    24                                  ;***********************************
+    25                                  ;	GDT
+    26                                  ;***********************************
+    27                                  gdt:
+    28                                    ;descriptor nulo
+    29 00000008 <res 00000008>            resb 8
+    29          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    30                                  
+    31                                    ; descriptor de datos (Base 0, size 64k, nivel 0)
+    32                                  dataSel0 equ $-gdt
+    33                                  
+    34 00000010 FFFF                      dw 0xffff
+    35 00000012 0000                      dw 0x0000
+    36 00000014 00                        db 0x00
+    37 00000015 92                        db 10010010b
+    38 00000016 00                        db 0x00
+    39 00000017 00                        db 0x00
+    40                                  
+    41                                  ; descriptor de video (Base: 0xb8000, size 4k, nivel 0)
+    42                                  videoSel0 equ $-gdt
+    43                                  
+    44 00000018 0010                      dw 0x1000
+    45 0000001A 0080                      dw 0x8000
+    46 0000001C 0B                        db 0x0b
+    47 0000001D 92                        db 10010010b
+    48 0000001E 00                        db 0x00
+    49 0000001F 00                        db 0x00
+    50                                  
+    51                                  ; descriptor de codigo (Base: 0x0000, size 64k, nivel 0)
+    52                                  codeSel0 equ $-gdt
+    53 00000020 FFFF                      dw 0xffff		; Limite en parte baja: 0xffff
+    54 00000022 0000                      dw 0x0000		; Base baja: 0x0000
+    55 00000024 00                        db 0x00		; Base media: 0x00
+    56 00000025 9A                        db 10011010b     	; Attr: P=1 (presencia), DPL=00, S=1 (no es de Sist), E=1 (exec, segmento de cod), C=0, R=0 (read),A=0(acc)
+    57 00000026 00                        db 0x00
+    58 00000027 00                        db 0x00		; Base alta: 0x0000
+    59                                  
+    60                                  ;tamaño de la gdt
+    61                                  gdtSize equ $-gdt
+    62                                  
+    63                                  ;***********************************
+    64                                  ;	Codigo
+    65                                  ;***********************************
+    66                                  ;comienzo del codigo
+    67                                  inicio: 
+    68                                  ;deshabilito interruciones
+    69 00000028 FA                      cli
+    70                                  ;***************
+    71                                  ;Breakpoint
+    72                                  ;***************
+    73 00000029 6631C0                  xor eax, eax
+    74                                  debug:
+    75 0000002C 3C01                     cmp al, 1
+    76 0000002E 75FC                     jne debug
+    77                                  
+    78                                  ;cargo gdtr
+    79 00000030 B81F00                  mov ax, gdtSize - 1	;longitud de gdt - 1
+    80 00000033 A3[0200]                mov [gdtr + 0], ax		
+    81                                  
+    82 00000036 6631C0                  xor eax, eax
+    83 00000039 B8[0800]                mov ax, gdt
+    84 0000003C 66A3[0400]              mov [gdtr + 2], eax	;ubicacion de la gdt en memoria	
+    85                                  
+    86                                  ; cargo en el registro gdtr
+    87 00000040 0F0116[0200]            lgdt [gdtr]
+    88                                  
+    89                                  ;paso a modo protegido
+    90 00000045 0F20C0                  mov eax, cr0
+    91 00000048 0C01                    or al,1
+    92 0000004A 0F22C0                  mov cr0, eax
+    93 0000004D EB00                    jmp short $+2
+    94                                  
+    95                                  ;CS no lo puedo cambiar haciendo: 
+    96                                  ;mov ax, codeSel0
+    97                                  ;mov cs, ax
+    98                                  
+    99                                  ; PROCESADOR EJECUTA EL CODIGO APUNTADO POR CS:EIP
+   100                                  ; modo real CS:0X0000	EIP: 0X8000
+   101                                  ; jmp pepe	se modifica solamente EIP = pepe / CS no cambio
+   102                                  ; jmp cs2:pepe	se modifica CS=cs2 y EIP = pepe
+   103                                  
+   104                                  
+   105                                  ;cargo en cs el selector de codigo codeSel0, hago salto largo (mod CS:EIP), corto (solo EIP)
+   106 0000004F EA[5400]1800            jmp codeSel0:modo_protegido
+   107                                  
+   108                                  modo_protegido:
+   109                                  ;cargo ds con el selector de video
+   110 00000054 B81000                  mov ax, videoSel0
+   111 00000057 8ED8                    mov ds, ax
+   112                                  ;cargo cantidad de puntos en pantalla a pintar
+   113 00000059 B9D007                  mov cx, 80*25
+   114                                  ;cargo valor del atributo
+   115 0000005C B078                    mov al, 0x78 ;01111000 (0x78) para pantalla normal 0x70
+   116                                  ;cargo edi = 1
+   117 0000005E 66BF01000000            mov edi, 1
+   118                                  bucle_pantalla:
+   119                                    ;guardo en ds:edi el valor 0x70
+   120 00000064 678807                    mov [edi], al
+   121                                    ;incremento edi en dos 
+   122 00000067 6647                      inc edi
+   123 00000069 6647                      inc edi
+   124                                    ;ciclo hasta terminar de recorrer el buffer de video
+   125 0000006B E2F7                      loop bucle_pantalla
+   126                                  
+   127                                  
+   128                                  ;loop infinito
+   129 0000006D EBFE                    jmp $
+   130                                  
+   131                                  
+   132                                  
+   133                                  
+   134                                  
+   135                                   

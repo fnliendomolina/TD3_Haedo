@@ -1,0 +1,224 @@
+     1                                  ;*******************************************************
+     2                                  ;Ejemplo
+     3                                  ;-Carga gdt (2 segmentos de datos y 1 segmento de codigo)
+     4                                  ;-Entra a modo protegido
+     5                                  ;-Carga en cs el segmento de codigo;
+     6                                  ;-habilito interrupciones
+     7                                  ;-espero presion de tecla
+     8                                  ;-deshabilito interrupciones
+     9                                  ;-Carga en ds el segmento de datos de video
+    10                                  ;-cambio el color de la pantalla
+    11                                  ;-al presionar tecla aumenta el contador mostrado en pantalla
+    12                                  ;*******************************************************
+    13                                  ;codigo 16 bits
+    14                                  use16
+    15                                  
+    16                                  ;offset del codigo en 0x8000
+    17                                  org 8000h
+    18                                  
+    19                                  ;voy a inicio (salteo variables)
+    20 00000000 E98100                  jmp inicio
+    21                                  
+    22                                  ;***********************************
+    23                                  ;	variables
+    24                                  ;***********************************
+    25 00000003 <res 00000006>          gdtr	resb	6
+    25          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    26 00000009 <res 00000006>          idtr 	resb    6
+    26          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    27 0000000F 00000000                keydown_counter dd	0;init keydown count (32 bits) - dw (16 bits)
+    28 00000013 00                      key_state	db	0;keydown or keyup
+    29                                  
+    30                                  ;***********************************
+    31                                  ;	GDT
+    32                                  ;***********************************
+    33                                  gdt:
+    34                                    ;descriptor nulo
+    35 00000014 <res 00000008>            resb 8
+    35          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    36                                  
+    37                                   ; descriptor de datos (base 0, size 64k, nivel 0)
+    38                                  dataSel0 equ $-gdt ; selector descr segment data --> index = 1, TI = 0, RPL = 00
+    39                                  
+    40 0000001C FFFF                      dw 0xffff     ; limit low part = 65536 = 64k
+    41 0000001E 0000                      dw 0x0000     ; first 2 bytes set = 0
+    42 00000020 00                        db 0x00       ; 3er byte base = 0
+    43 00000021 92                        db 10010010b  ; attr:P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0 
+    44 00000022 00                        db 0x00       ; attr high part = 0
+    45 00000023 00                        db 0x00       ; 4to byte base = 0
+    46                                  
+    47                                  ; video descriptor (offset: 0xb8000, size 4k, nivel 0)
+    48                                  videoSel0 equ $-gdt ; selector descr video segment data --> index = 3, TI = 0, RPL = 00
+    49                                  
+    50 00000024 0010                     dw 0x1000     ; limit low part = 4096 = 4k
+    51 00000026 0080                     dw 0x8000     ; base = 0xb8000, first 2 bytes set 8000
+    52 00000028 0B                       db 0x0b       ; 3 byte set b
+    53 00000029 92                       db 10010010b  ; attr: P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0
+    54 0000002A 00                       db 0x00       ; attr high part = 0
+    55 0000002B 00                       db 0x00       ; 4to byte base = 0
+    56                                  
+    57                                  ; code descriptor (base 0x0000, size 64k, nivel 0) for handler
+    58                                  codeSel0 equ $-gdt ; selector descr segment code --> index = 2, TI = 0, RPL = 00
+    59 0000002C FFFF                      dw 0xffff	; limit low part = 65536 = 64k
+    60 0000002E 0000                      dw 0x0000	; first 2 bytes base = 0
+    61 00000030 00                        db 0x00	; 3er byte base = 0
+    62 00000031 9A                        db 10011010b	; Attr: P=1 DPL=00 S=1 TIPO=101 (E=1 code segment, C=0, R=1 read and execute) A=0
+    63 00000032 00                        db 0x00	; attr high part = 0
+    64 00000033 00                        db 0x00	; 4to byte base = 0
+    65                                  
+    66                                  ;tamaño de la gdt
+    67                                  gdtSize equ $-gdt
+    68                                  
+    69                                  
+    70                                  ;***********************************
+    71                                  ;	IDT
+    72                                  ;***********************************
+    73                                  idt:
+    74                                    ;entradas no utilizadas. No uso int 0 a int 8, pero tengo que dejar el espacio para los descriptores. 
+    75 00000034 <res 00000048>            resb 8*9	;desde 0 a 8 descriptores para las INT estan vacios en el 10 comienza la de teclado 
+    75          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    76                                  
+    77                                    ;PUERTA de interrupcion (int 9, irq1, teclado)
+    78 0000007C [1C01]                    dw irq1Handler	;9h INT keyboard. 2 bytes offset donde estara el handler a partir de la base del code segment
+    79 0000007E 1800                      dw codeSel0	;low part
+    80 00000080 00                        db 0		;bits from 32 to 39 set 0
+    81 00000081 86                        db 0x86	;byte attr: P=1 DPL=00 S=0 (system) TIPO=0110 (Gate int. 16 bits) 
+    82 00000082 0000                      dw 0x00	;last 2 bytes offset set 0
+    83                                  
+    84                                  idtSize equ $-idt	;para sacar el tamano de la IDT
+    85                                  ;***********************************
+    86                                  ;	Codigo
+    87                                  ;***********************************
+    88                                  ;comienzo del codigo
+    89                                  inicio: 
+    90                                  ;deshabilito interruciones
+    91 00000084 FA                      cli
+    92                                  ;base en la parte baja y limite en la parte alta
+    93                                  
+    94                                  ;cargo gdtr
+    95 00000085 B81F00                  mov ax, gdtSize - 1	;longitud de gdt - 1
+    96 00000088 A3[0300]                mov [gdtr + 0], ax		
+    97                                  
+    98 0000008B 6631C0                  xor eax, eax
+    99 0000008E B8[1400]                mov ax, gdt
+   100 00000091 66A3[0500]              mov [gdtr + 2], eax	;ubicacion de la gdt en memoria	
+   101                                  
+   102                                  ;cargo idtr
+   103 00000095 B84F00                  mov ax, idtSize - 1	;longitud de idt - 1
+   104 00000098 A3[0900]                mov [idtr + 0], ax		
+   105                                  
+   106 0000009B 6631C0                  xor eax, eax	;clear bits eax
+   107 0000009E 66B8[34000000]          mov eax, idt
+   108 000000A4 66A3[0B00]              mov [idtr + 2], eax	;ubicacion de la idt en memoria	
+   109                                  
+   110                                  ; cargo en el registro gdtr (tabla global de desc)
+   111 000000A8 0F0116[0300]            lgdt [gdtr]
+   112                                  
+   113                                  ; cargo en el registro idtr load idt (tabla de INT)
+   114 000000AD 0F011E[0900]            lidt [idtr]
+   115                                  
+   116                                  ;paso a modo protegido
+   117 000000B2 0F20C0                  mov eax, cr0
+   118 000000B5 0C01                    or al,1
+   119 000000B7 0F22C0                  mov cr0, eax
+   120 000000BA EB00                    jmp short $+2
+   121                                  
+   122                                  ;cargo en cs el selector de codigo codeSel0
+   123 000000BC EA[C100]1800            jmp codeSel0:modo_protegido	;salto largo, guardo en CS el selector de codigo para modo protegido
+   124                                  
+   125                                  modo_protegido:
+   126                                  ;load ss, ds, and es with data select (used for print screen)
+   127 000000C1 B80800                  mov ax, dataSel0
+   128 000000C4 8ED0                    mov ss, ax	;como trabajo con INT debo config la PILA. SS:ESP (debo definir un area de pila)
+   129 000000C6 8ED8                    mov ds, ax
+   130                                  
+   131                                  ;guardo los datos para la pila en la direccion fin+100h. El ESP va decrementado a medida que guardo en la PILA.
+   132                                  ;si la pila ocupa mas de 100h va a comerse parte del codigo (ojo)
+   133                                  
+   134                                  ;apunto esp al final del codigo + 0x100 (100 bytes)... ahi empieza la PILA
+   135 000000C8 66B8[48020000]          mov eax, fin + 0x100
+   136 000000CE 6689C4                  mov esp, eax
+   137                                  
+   138                                  ;enmascaro todas las interrupciones menos la irq1 (Teclado) enable -   int 9h solo dejo las que quiero usar
+   139                                  ;                                            irq0 (timer tick) disable int 8h
+   140                                  
+   141 000000D1 B0FD                    mov al, 0xfd            ; Mascara PIC Master (0x21)   0xfd   1111 1101 (IRQ9) estos 8 bits es el IMR, en 0 la INT que habilito
+   142 000000D3 E621                    out 0x21, al
+   143                                  
+   144 000000D5 B0FF                    mov al, 0xff            ; Mascara PIC Slave (0xff)
+   145 000000D7 E6A1                    out 0xa1, al
+   146                                  
+   147                                  ;cargo ds con el selector de video
+   148                                  ;Pantalla en modo inverso
+   149 000000D9 B81000                  mov ax, videoSel0
+   150 000000DC 8EC0                    mov es, ax
+   151 000000DE B9D007                  mov cx, 80*25	;set count pixels
+   152 000000E1 66BF00000000            mov edi, 0x00	;set index = 0 
+   153                                  
+   154                                  bucle_pantalla:
+   155 000000E7 B000                      mov al, 0x00	;clear character
+   156 000000E9 26678807                  mov [es:edi], al	;clear
+   157 000000ED 6647                      inc edi	;change attr
+   158 000000EF B077                      mov al, 0x77	;set attr char white and background white --> 0 111 | 0 111
+   159 000000F1 26678807                  mov [es:edi], al
+   160 000000F5 6647                      inc edi
+   161                                    ;ciclo hasta terminar de recorrer el buffer de video
+   162 000000F7 E2EE                      loop bucle_pantalla	;cx-- and loop while cx>0
+   163                                  
+   164                                  ;***************
+   165                                  ;Breakpoint
+   166                                  ;***************
+   167 000000F9 6631C0                  xor eax, eax
+   168                                  debug:
+   169 000000FC 3C01                    	cmp al, 1
+   170 000000FE 75FC                    	jne debug
+   171                                  	
+   172 00000100 6631FF                  xor edi, edi	;set offset=0, first character
+   173 00000103 FB                      sti	;habilito interrupciones
+   174                                  
+   175                                  wait_keypress:
+   176 00000104 6631C0                  	xor eax, eax
+   177 00000107 A0[0F00]                	mov al, [keydown_counter]
+   178 0000010A 0430                    	add al, 0x30		;convert number 1 digit to ASCII 
+   179 0000010C 26678807                	mov [es:edi], al	;print counter
+   180 00000110 6647                    	inc edi		;attr char
+   181 00000112 B070                    	mov al, 0x70		;black char 0111 0000
+   182 00000114 26678807                	mov [es:edi], al
+   183 00000118 664F                    	dec edi
+   184                                  	
+   185 0000011A EBE8                    	jmp wait_keypress
+   186                                  
+   187                                  irq1Handler:
+   188 0000011C FA                        cli	;disable interrupts
+   189 0000011D B020                      mov al, 0x20
+   190 0000011F E620                      out 0x20, al
+   191 00000121 E460                      in al, 0x60
+   192 00000123 6631C0                    xor eax, eax
+   193                                    
+   194 00000126 A0[1300]                  mov al, [key_state]
+   195 00000129 3C00                      cmp al, 0	;zero set variable 1
+   196 0000012B 7514                      jne set_key_state
+   197                                    
+   198 0000012D B001                      mov al, 1
+   199 0000012F A2[1300]                  mov [key_state], al
+   200                                    
+   201 00000132 6631C0                    xor eax, eax
+   202 00000135 66A1[0F00]                mov eax, [keydown_counter]
+   203 00000139 6640                      inc eax
+   204 0000013B 66A3[0F00]                mov [keydown_counter], eax
+   205                                    
+   206 0000013F EB05                      jmp fin_handler
+   207                                    
+   208                                  set_key_state:
+   209 00000141 B000                    	mov al, 0
+   210 00000143 A2[1300]                	mov [key_state], al
+   211                                  
+   212                                  fin_handler:
+   213 00000146 FB                          sti
+   214 00000147 CF                          iret                       ; fin de la interrupcion. interrupt return
+   215                                  
+   216                                  
+   217                                  fin:            
+   218                                  
+   219                                  ; 100h mas adelante configuro el ESP de la pila. 
+   220                                   
