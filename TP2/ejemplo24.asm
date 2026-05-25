@@ -28,6 +28,8 @@ idtr 	resb    6
 keydown_counter dd	0;init keydown count (32 bits) - dw (16 bits)
 key_state	db	0;keydown or keyup
 msgException db 'A fatal exception DE has occurred. The current application will be terminated.'
+counter_decenas db 0; contador decenas
+counter_unidades db 0; contador unidades
 
 ;***********************************
 ;	GDT
@@ -313,28 +315,28 @@ bucle_pantalla:
   inc edi
   ;ciclo hasta terminar de recorrer el buffer de video
   loop bucle_pantalla	;cx-- and loop while cx>0
-
-;***************
-;Breakpoint
-;***************
-xor eax, eax
-debug:
-	cmp al, 1
-	jne debug
 	
-xor edi, edi	;set offset=0, first character
 sti	;habilito interrupciones
 
 wait_keypress:
 	xor eax, eax
-	mov al, [keydown_counter]
+  xor edi, edi ;set offset=0, first character
+
+	mov al, [ds:counter_decenas]
 	add al, 0x30		;convert number 1 digit to ASCII 
-	mov [es:edi], al	;print counter
+	mov [es:edi], al	;print decenas
 	inc edi		;attr char
 	mov al, 0x70		;black char 0111 0000
 	mov [es:edi], al
-	dec edi
-	
+	inc edi ;next char
+
+  mov al, [ds:counter_unidades]
+	add al, 0x30		;convert number 1 digit to ASCII 
+	mov [es:edi], al	;print unidades
+	inc edi		;attr char
+	mov al, 0x70		;black char 0111 0000
+	mov [es:edi], al
+
 	jmp wait_keypress
 
 excHandler:
@@ -358,7 +360,7 @@ excHandler:
     xor edi, edi ; vuelvo a poner el offset en 0, para escribir en el primer caracter
     xor eax, eax ; vuelvo a poner en 0 eax
     
-    ;Ahora muestro mensaje de "error"
+    ;Ahora muestro mensaje de error
     printMessage:
     mov al, BYTE [ds:msgException+edx] ; Leo un char del string
     cmp al, 0                    ; Si es NULL fin del string
@@ -407,6 +409,13 @@ no_jota:
   mov eax, [keydown_counter]
   inc eax
   mov [keydown_counter], eax
+
+  ;separo en unidades y decenas, divido por 10
+  mov bl, 10 ;divido contador por 10
+  mov ah, 0
+  div bl ;ax/bx
+  mov [ds:counter_decenas], al ;cociente 
+  mov [ds:counter_unidades], ah ;resto
   
   jmp fin_handler
   

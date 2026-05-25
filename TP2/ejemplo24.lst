@@ -18,7 +18,7 @@
     18                                  org 8000h
     19                                  
     20                                  ;voy a inicio (salteo variables)
-    21 00000000 E98F01                  jmp inicio
+    21 00000000 E99101                  jmp inicio
     22                                  
     23                                  ;***********************************
     24                                  ;	variables
@@ -38,402 +38,411 @@
     30 0000004A 74696F6E2077696C6C-
     30 00000053 206265207465726D69-
     30 0000005C 6E617465642E       
-    31                                  
-    32                                  ;***********************************
-    33                                  ;	GDT
+    31 00000062 00                      counter_decenas db 0; contador decenas
+    32 00000063 00                      counter_unidades db 0; contador unidades
+    33                                  
     34                                  ;***********************************
-    35                                  gdt:
-    36                                    ;descriptor nulo
-    37 00000062 <res 00000008>            resb 8
-    37          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
-    38                                  
-    39                                   ; descriptor de datos (base 0, size 64k, nivel 0)
-    40                                  dataSel0 equ $-gdt ; selector descr segment data --> index = 1, TI = 0, RPL = 00
-    41                                  
-    42 0000006A FFFF                      dw 0xffff     ; limit low part = 65536 = 64k
-    43 0000006C 0000                      dw 0x0000     ; first 2 bytes set = 0
-    44 0000006E 00                        db 0x00       ; 3er byte base = 0
-    45 0000006F 92                        db 10010010b  ; attr:P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0 
-    46 00000070 00                        db 0x00       ; attr high part = 0
-    47 00000071 00                        db 0x00       ; 4to byte base = 0
-    48                                  
-    49                                  ; video descriptor (offset: 0xb8000, size 4k, nivel 0)
-    50                                  videoSel0 equ $-gdt ; selector descr video segment data --> index = 3, TI = 0, RPL = 00
-    51                                  
-    52 00000072 0010                     dw 0x1000     ; limit low part = 4096 = 4k
-    53 00000074 0080                     dw 0x8000     ; base = 0xb8000, first 2 bytes set 8000
-    54 00000076 0B                       db 0x0b       ; 3 byte set b
-    55 00000077 92                       db 10010010b  ; attr: P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0
-    56 00000078 00                       db 0x00       ; attr high part = 0
-    57 00000079 00                       db 0x00       ; 4to byte base = 0
-    58                                  
-    59                                  ; code descriptor (base 0x0000, size 64k, nivel 0) for handler
-    60                                  codeSel0 equ $-gdt ; selector descr segment code --> index = 2, TI = 0, RPL = 00
-    61 0000007A FFFF                      dw 0xffff	; limit low part = 65536 = 64k
-    62 0000007C 0000                      dw 0x0000	; first 2 bytes base = 0
-    63 0000007E 00                        db 0x00	; 3er byte base = 0
-    64 0000007F 9A                        db 10011010b	; Attr: P=1 DPL=00 S=1 TIPO=101 (E=1 code segment, C=0, R=1 read and execute) A=0
-    65 00000080 00                        db 0x00	; attr high part = 0
-    66 00000081 00                        db 0x00	; 4to byte base = 0
-    67                                  
-    68                                  ;tamaño de la gdt
-    69                                  gdtSize equ $-gdt
-    70                                  
-    71                                  
-    72                                  ;***********************************
-    73                                  ;	IDT
+    35                                  ;	GDT
+    36                                  ;***********************************
+    37                                  gdt:
+    38                                    ;descriptor nulo
+    39 00000064 <res 00000008>            resb 8
+    39          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    40                                  
+    41                                   ; descriptor de datos (base 0, size 64k, nivel 0)
+    42                                  dataSel0 equ $-gdt ; selector descr segment data --> index = 1, TI = 0, RPL = 00
+    43                                  
+    44 0000006C FFFF                      dw 0xffff     ; limit low part = 65536 = 64k
+    45 0000006E 0000                      dw 0x0000     ; first 2 bytes set = 0
+    46 00000070 00                        db 0x00       ; 3er byte base = 0
+    47 00000071 92                        db 10010010b  ; attr:P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0 
+    48 00000072 00                        db 0x00       ; attr high part = 0
+    49 00000073 00                        db 0x00       ; 4to byte base = 0
+    50                                  
+    51                                  ; video descriptor (offset: 0xb8000, size 4k, nivel 0)
+    52                                  videoSel0 equ $-gdt ; selector descr video segment data --> index = 3, TI = 0, RPL = 00
+    53                                  
+    54 00000074 0010                     dw 0x1000     ; limit low part = 4096 = 4k
+    55 00000076 0080                     dw 0x8000     ; base = 0xb8000, first 2 bytes set 8000
+    56 00000078 0B                       db 0x0b       ; 3 byte set b
+    57 00000079 92                       db 10010010b  ; attr: P=1 DPL=00 S=1 TIPO=001 (E=0 data segment, ED=0, W=1 write) A=0
+    58 0000007A 00                       db 0x00       ; attr high part = 0
+    59 0000007B 00                       db 0x00       ; 4to byte base = 0
+    60                                  
+    61                                  ; code descriptor (base 0x0000, size 64k, nivel 0) for handler
+    62                                  codeSel0 equ $-gdt ; selector descr segment code --> index = 2, TI = 0, RPL = 00
+    63 0000007C FFFF                      dw 0xffff	; limit low part = 65536 = 64k
+    64 0000007E 0000                      dw 0x0000	; first 2 bytes base = 0
+    65 00000080 00                        db 0x00	; 3er byte base = 0
+    66 00000081 9A                        db 10011010b	; Attr: P=1 DPL=00 S=1 TIPO=101 (E=1 code segment, C=0, R=1 read and execute) A=0
+    67 00000082 00                        db 0x00	; attr high part = 0
+    68 00000083 00                        db 0x00	; 4to byte base = 0
+    69                                  
+    70                                  ;tamaño de la gdt
+    71                                  gdtSize equ $-gdt
+    72                                  
+    73                                  
     74                                  ;***********************************
-    75                                  idt:
-    76                                    ;Excepciones predefinidas en el uP --> 
-    77                                    ;Uso mismo handler, mismo selector con campo TIPO: 16 bits trap gate (TIPO=0111)
-    78                                    
-    79                                    ;Excepcion 0: Divide Error
-    80 00000082 [4A02]                      dw excHandler  ; Handler que atiende la excep
-    81 00000084 1800                        dw codeSel0
-    82 00000086 00                          db 0
-    83 00000087 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-    84 00000088 0000                        dw 0x00
-    85                                      
-    86                                    ;Excepcion 1: Debug
-    87 0000008A [4A02]                      dw excHandler  ; Handler que atiende la excep
-    88 0000008C 1800                        dw codeSel0
-    89 0000008E 00                          db 0
-    90 0000008F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-    91 00000090 0000                        dw 0x00
-    92                                  
-    93 00000092 <res 00000008>              resb 8 ; Aca dejo espacio libre pues es la Interrupcion 2
-    93          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
-    94                                      
-    95                                    ;Excepcion 3: Breakpoint
-    96 0000009A [4A02]                      dw excHandler  ; OHandler que atiende la excep
-    97 0000009C 1800                        dw codeSel0
-    98 0000009E 00                          db 0
-    99 0000009F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   100 000000A0 0000                        dw 0x00
-   101                                  
-   102                                    ;Excepcion 4: Overflow
-   103 000000A2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   104 000000A4 1800                        dw codeSel0
-   105 000000A6 00                          db 0
-   106 000000A7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   107 000000A8 0000                        dw 0x00
-   108                                  
-   109                                    ;Excepcion 5: Bound Range Exceed
-   110 000000AA [4A02]                      dw excHandler  ; Handler que atiende la excep
-   111 000000AC 1800                        dw codeSel0
-   112 000000AE 00                          db 0
-   113 000000AF 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   114 000000B0 0000                        dw 0x00
-   115                                  
-   116                                    ;Excepcion 6: Invalid Opcode
-   117 000000B2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   118 000000B4 1800                        dw codeSel0
-   119 000000B6 00                          db 0
-   120 000000B7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   121 000000B8 0000                        dw 0x00
-   122                                      
-   123                                    ;Excepcion 7: Device not available
-   124 000000BA [4A02]                      dw excHandler  ; Handler que atiende la excep
-   125 000000BC 1800                        dw codeSel0
-   126 000000BE 00                          db 0
-   127 000000BF 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   128 000000C0 0000                        dw 0x00
-   129                                  
-   130                                    ;Excepcion 8: Double Fault
-   131 000000C2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   132 000000C4 1800                        dw codeSel0
-   133 000000C6 00                          db 0
-   134 000000C7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   135 000000C8 0000                        dw 0x00
-   136                                  
-   137                                    ;Excepcion 9: Coproccesor segment overrun
-   138 000000CA [4A02]                      dw excHandler  ; Handler que atiende la excep
-   139 000000CC 1800                        dw codeSel0
-   140 000000CE 00                          db 0
-   141 000000CF 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   142 000000D0 0000                        dw 0x00
-   143                                  
-   144                                    ;Excepcion 10: Invalid TSS
-   145 000000D2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   146 000000D4 1800                        dw codeSel0
-   147 000000D6 00                          db 0
-   148 000000D7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   149 000000D8 0000                        dw 0x00
-   150                                  
-   151                                    ;Excepcion 11: Segment Not Present
-   152 000000DA [4A02]                      dw excHandler  ; Handler que atiende la excep
-   153 000000DC 1800                        dw codeSel0
-   154 000000DE 00                          db 0
-   155 000000DF 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   156 000000E0 0000                        dw 0x00
-   157                                  
-   158                                    ;Excepcion 12: Stack Segment
-   159 000000E2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   160 000000E4 1800                        dw codeSel0
-   161 000000E6 00                          db 0
-   162 000000E7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   163 000000E8 0000                        dw 0x00
-   164                                  
-   165                                    ;Excepcion 13: General Protection
-   166 000000EA [4A02]                      dw excHandler  ; Handler que atiende la excep
-   167 000000EC 1800                        dw codeSel0
-   168 000000EE 00                          db 0
-   169 000000EF 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   170 000000F0 0000                        dw 0x00
-   171                                  
-   172                                    ;Excepcion 14: Page Fault
-   173 000000F2 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   174 000000F4 1800                        dw codeSel0
-   175 000000F6 00                          db 0
-   176 000000F7 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   177 000000F8 0000                        dw 0x00
-   178                                      
-   179 000000FA <res 00000008>              resb 8         ; la 15 esta reservada
-   179          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
-   180                                  
-   181                                    ;Excepcion 16: Floating Point Error
-   182 00000102 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   183 00000104 1800                        dw codeSel0
-   184 00000106 00                          db 0
-   185 00000107 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   186 00000108 0000                        dw 0x00
-   187                                  
-   188                                    ;Excepcion 17: Alignment Check
-   189 0000010A [4A02]                      dw excHandler  ; Handler que atiende la excep
-   190 0000010C 1800                        dw codeSel0
-   191 0000010E 00                          db 0
-   192 0000010F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   193 00000110 0000                        dw 0x00
-   194                                  
-   195                                    ;Excepcion 18: Machine Check
-   196 00000112 [4A02]                      dw excHandler  ; Handler que atiende la excep
-   197 00000114 1800                        dw codeSel0
-   198 00000116 00                          db 0
-   199 00000117 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   200 00000118 0000                        dw 0x00
-   201                                  
-   202                                    ;Excepcion 19: SIMD Floating Point Exception
-   203 0000011A [4A02]                      dw excHandler  ; Handler que atiende la excep
-   204 0000011C 1800                        dw codeSel0
-   205 0000011E 00                          db 0
-   206 0000011F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
-   207 00000120 0000                        dw 0x00
-   208                                    
-   209 00000122 <res 00000068>            resb 8*13 ; de la 20 a la 31 son reservadas y la 32 es el TimerTick. Son 13 lugares en total.
-   209          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
-   210                                  
-   211                                    ;PUERTA de interrupcion (int 0x21, irq1, teclado)
-   212 0000018A [9302]                    dw irq1Handler	;2 bytes offset donde estara el handler a partir de la base del code segment
-   213 0000018C 1800                      dw codeSel0	;low part
-   214 0000018E 00                        db 0		;bits from 32 to 39 set 0
-   215 0000018F 86                        db 0x86	;byte attr: P=1 DPL=00 S=0 (system) TIPO=0110 (Gate int. 16 bits) 
-   216 00000190 0000                      dw 0x00	;last 2 bytes offset set 0
-   217                                  
-   218                                  idtSize equ $-idt	;para sacar el tamano de la IDT
-   219                                  ;***********************************
-   220                                  ;	Codigo
+    75                                  ;	IDT
+    76                                  ;***********************************
+    77                                  idt:
+    78                                    ;Excepciones predefinidas en el uP --> 
+    79                                    ;Uso mismo handler, mismo selector con campo TIPO: 16 bits trap gate (TIPO=0111)
+    80                                    
+    81                                    ;Excepcion 0: Divide Error
+    82 00000084 [5802]                      dw excHandler  ; Handler que atiende la excep
+    83 00000086 1800                        dw codeSel0
+    84 00000088 00                          db 0
+    85 00000089 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+    86 0000008A 0000                        dw 0x00
+    87                                      
+    88                                    ;Excepcion 1: Debug
+    89 0000008C [5802]                      dw excHandler  ; Handler que atiende la excep
+    90 0000008E 1800                        dw codeSel0
+    91 00000090 00                          db 0
+    92 00000091 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+    93 00000092 0000                        dw 0x00
+    94                                  
+    95 00000094 <res 00000008>              resb 8 ; Aca dejo espacio libre pues es la Interrupcion 2
+    95          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    96                                      
+    97                                    ;Excepcion 3: Breakpoint
+    98 0000009C [5802]                      dw excHandler  ; OHandler que atiende la excep
+    99 0000009E 1800                        dw codeSel0
+   100 000000A0 00                          db 0
+   101 000000A1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   102 000000A2 0000                        dw 0x00
+   103                                  
+   104                                    ;Excepcion 4: Overflow
+   105 000000A4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   106 000000A6 1800                        dw codeSel0
+   107 000000A8 00                          db 0
+   108 000000A9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   109 000000AA 0000                        dw 0x00
+   110                                  
+   111                                    ;Excepcion 5: Bound Range Exceed
+   112 000000AC [5802]                      dw excHandler  ; Handler que atiende la excep
+   113 000000AE 1800                        dw codeSel0
+   114 000000B0 00                          db 0
+   115 000000B1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   116 000000B2 0000                        dw 0x00
+   117                                  
+   118                                    ;Excepcion 6: Invalid Opcode
+   119 000000B4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   120 000000B6 1800                        dw codeSel0
+   121 000000B8 00                          db 0
+   122 000000B9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   123 000000BA 0000                        dw 0x00
+   124                                      
+   125                                    ;Excepcion 7: Device not available
+   126 000000BC [5802]                      dw excHandler  ; Handler que atiende la excep
+   127 000000BE 1800                        dw codeSel0
+   128 000000C0 00                          db 0
+   129 000000C1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   130 000000C2 0000                        dw 0x00
+   131                                  
+   132                                    ;Excepcion 8: Double Fault
+   133 000000C4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   134 000000C6 1800                        dw codeSel0
+   135 000000C8 00                          db 0
+   136 000000C9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   137 000000CA 0000                        dw 0x00
+   138                                  
+   139                                    ;Excepcion 9: Coproccesor segment overrun
+   140 000000CC [5802]                      dw excHandler  ; Handler que atiende la excep
+   141 000000CE 1800                        dw codeSel0
+   142 000000D0 00                          db 0
+   143 000000D1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   144 000000D2 0000                        dw 0x00
+   145                                  
+   146                                    ;Excepcion 10: Invalid TSS
+   147 000000D4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   148 000000D6 1800                        dw codeSel0
+   149 000000D8 00                          db 0
+   150 000000D9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   151 000000DA 0000                        dw 0x00
+   152                                  
+   153                                    ;Excepcion 11: Segment Not Present
+   154 000000DC [5802]                      dw excHandler  ; Handler que atiende la excep
+   155 000000DE 1800                        dw codeSel0
+   156 000000E0 00                          db 0
+   157 000000E1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   158 000000E2 0000                        dw 0x00
+   159                                  
+   160                                    ;Excepcion 12: Stack Segment
+   161 000000E4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   162 000000E6 1800                        dw codeSel0
+   163 000000E8 00                          db 0
+   164 000000E9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   165 000000EA 0000                        dw 0x00
+   166                                  
+   167                                    ;Excepcion 13: General Protection
+   168 000000EC [5802]                      dw excHandler  ; Handler que atiende la excep
+   169 000000EE 1800                        dw codeSel0
+   170 000000F0 00                          db 0
+   171 000000F1 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   172 000000F2 0000                        dw 0x00
+   173                                  
+   174                                    ;Excepcion 14: Page Fault
+   175 000000F4 [5802]                      dw excHandler  ; Handler que atiende la excep
+   176 000000F6 1800                        dw codeSel0
+   177 000000F8 00                          db 0
+   178 000000F9 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   179 000000FA 0000                        dw 0x00
+   180                                      
+   181 000000FC <res 00000008>              resb 8         ; la 15 esta reservada
+   181          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   182                                  
+   183                                    ;Excepcion 16: Floating Point Error
+   184 00000104 [5802]                      dw excHandler  ; Handler que atiende la excep
+   185 00000106 1800                        dw codeSel0
+   186 00000108 00                          db 0
+   187 00000109 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   188 0000010A 0000                        dw 0x00
+   189                                  
+   190                                    ;Excepcion 17: Alignment Check
+   191 0000010C [5802]                      dw excHandler  ; Handler que atiende la excep
+   192 0000010E 1800                        dw codeSel0
+   193 00000110 00                          db 0
+   194 00000111 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   195 00000112 0000                        dw 0x00
+   196                                  
+   197                                    ;Excepcion 18: Machine Check
+   198 00000114 [5802]                      dw excHandler  ; Handler que atiende la excep
+   199 00000116 1800                        dw codeSel0
+   200 00000118 00                          db 0
+   201 00000119 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   202 0000011A 0000                        dw 0x00
+   203                                  
+   204                                    ;Excepcion 19: SIMD Floating Point Exception
+   205 0000011C [5802]                      dw excHandler  ; Handler que atiende la excep
+   206 0000011E 1800                        dw codeSel0
+   207 00000120 00                          db 0
+   208 00000121 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   209 00000122 0000                        dw 0x00
+   210                                    
+   211 00000124 <res 00000068>            resb 8*13 ; de la 20 a la 31 son reservadas y la 32 es el TimerTick. Son 13 lugares en total.
+   211          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   212                                  
+   213                                    ;PUERTA de interrupcion (int 0x21, irq1, teclado)
+   214 0000018C [A102]                    dw irq1Handler	;2 bytes offset donde estara el handler a partir de la base del code segment
+   215 0000018E 1800                      dw codeSel0	;low part
+   216 00000190 00                        db 0		;bits from 32 to 39 set 0
+   217 00000191 86                        db 0x86	;byte attr: P=1 DPL=00 S=0 (system) TIPO=0110 (Gate int. 16 bits) 
+   218 00000192 0000                      dw 0x00	;last 2 bytes offset set 0
+   219                                  
+   220                                  idtSize equ $-idt	;para sacar el tamano de la IDT
    221                                  ;***********************************
-   222                                  ;comienzo del codigo
-   223                                  inicio: 
-   224                                  ;deshabilito interruciones
-   225 00000192 FA                          cli
-   226                                  
-   227                                  ;Inicializacion PIC 1
-   228 00000193 B011                        mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
-   229 00000195 E620                        out 0x20, al
-   230 00000197 B020                        mov al, 0x20 ; icw2: INT base para el PIC N#1 tipo 20H (IRQ0 sera el tipo de interrupcion 20h)
-   231 00000199 E621                        out 0x21, al ; el PIC1 comienza en 0x20
-   232 0000019B B004                        mov al, 0x04 ; icw3: PIC N#1 Master tiene un slave conectado a IRQ2 (0000 0100b)
-   233 0000019D E621                        out 0x21, al
-   234 0000019F B001                        mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
-   235 000001A1 E621                        out 0x21, al
-   236                                  
-   237                                  ;Inicializacion PIC 2
-   238 000001A3 B011                        mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
-   239 000001A5 E6A0                        out 0xa0, al
-   240 000001A7 B028                        mov al, 0x28 ; icw2: INT base para el PIC N#1 tipo 28h
-   241 000001A9 E6A1                        out 0xa1, al ; el PIC2 comienza en 0x28
-   242 000001AB B002                        mov al, 0x02 ; icw3: PIC N#2 Slave, IRQ2 es la linea que envia al Master (010b)
-   243 000001AD E6A1                        out 0xa1, al
-   244 000001AF B001                        mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
-   245 000001B1 E6A1                        out 0xa1, al
-   246                                  
-   247                                  ;cargo gdtr
-   248 000001B3 B81F00                  mov ax, gdtSize - 1	;longitud de gdt - 1
-   249 000001B6 A3[0300]                mov [gdtr + 0], ax		
-   250                                  
-   251 000001B9 6631C0                  xor eax, eax
-   252 000001BC B8[6200]                mov ax, gdt
-   253 000001BF 66A3[0500]              mov [gdtr + 2], eax	;ubicacion de la gdt en memoria	
-   254                                  
-   255                                  ;cargo idtr
-   256 000001C3 B80F01                  mov ax, idtSize - 1	;longitud de idt - 1
-   257 000001C6 A3[0900]                mov [idtr + 0], ax		
-   258                                  
-   259 000001C9 6631C0                  xor eax, eax	;clear bits eax
-   260 000001CC 66B8[82000000]          mov eax, idt
-   261 000001D2 66A3[0B00]              mov [idtr + 2], eax	;ubicacion de la idt en memoria	
-   262                                  
-   263                                  ; cargo en el registro gdtr (tabla global de desc)
-   264 000001D6 0F0116[0300]            lgdt [gdtr]
-   265                                  
-   266                                  ; cargo en el registro idtr load idt (tabla de INT)
-   267 000001DB 0F011E[0900]            lidt [idtr]
-   268                                  
-   269                                  ;paso a modo protegido
-   270 000001E0 0F20C0                  mov eax, cr0
-   271 000001E3 0C01                    or al,1
-   272 000001E5 0F22C0                  mov cr0, eax
-   273 000001E8 EB00                    jmp short $+2
-   274                                  
-   275                                  ;cargo en cs el selector de codigo codeSel0
-   276 000001EA EA[EF01]1800            jmp codeSel0:modo_protegido	;salto largo, guardo en CS el selector de codigo para modo protegido
-   277                                  
-   278                                  modo_protegido:
-   279                                  ;load ss, ds, and es with data select (used for print screen)
-   280 000001EF B80800                  mov ax, dataSel0
-   281 000001F2 8ED0                    mov ss, ax	;como trabajo con INT debo config la PILA. SS:ESP (debo definir un area de pila)
-   282 000001F4 8ED8                    mov ds, ax
-   283                                  
-   284                                  ;guardo los datos para la pila en la direccion fin+100h. El ESP va decrementado a medida que guardo en la PILA.
-   285                                  ;si la pila ocupa mas de 100h va a comerse parte del codigo (ojo)
-   286                                  
-   287                                  ;apunto esp al final del codigo + 0x100 (100 bytes)... ahi empieza la PILA
-   288 000001F6 66B8[D5030000]          mov eax, fin + 0x100
-   289 000001FC 6689C4                  mov esp, eax
-   290                                  
-   291                                  ;enmascaro todas las interrupciones menos la irq1 (Teclado) enable -   int 9h solo dejo las que quiero usar
-   292                                  ;                                            irq0 (timer tick) disable int 8h
-   293                                  
-   294 000001FF B0FD                    mov al, 0xfd            ; Mascara PIC Master (0x21)   0xfd   1111 1101 (IRQ9) estos 8 bits es el IMR, en 0 la INT que habilito
-   295 00000201 E621                    out 0x21, al
-   296                                  
-   297 00000203 B0FF                    mov al, 0xff            ; Mascara PIC Slave (0xff)
-   298 00000205 E6A1                    out 0xa1, al
-   299                                  
-   300                                  ;cargo ds con el selector de video
-   301                                  ;Pantalla en modo inverso
-   302 00000207 B81000                  mov ax, videoSel0
-   303 0000020A 8EC0                    mov es, ax
-   304 0000020C B9D007                  mov cx, 80*25	;set count pixels
-   305 0000020F 66BF00000000            mov edi, 0x00	;set index = 0 
-   306                                  
-   307                                  bucle_pantalla:
-   308 00000215 B000                      mov al, 0x00	;clear character
-   309 00000217 26678807                  mov [es:edi], al	;clear
-   310 0000021B 6647                      inc edi	;change attr
-   311 0000021D B077                      mov al, 0x77	;set attr char white and background white --> 0 111 | 0 111
-   312 0000021F 26678807                  mov [es:edi], al
-   313 00000223 6647                      inc edi
-   314                                    ;ciclo hasta terminar de recorrer el buffer de video
-   315 00000225 E2EE                      loop bucle_pantalla	;cx-- and loop while cx>0
-   316                                  
-   317                                  ;***************
-   318                                  ;Breakpoint
-   319                                  ;***************
-   320 00000227 6631C0                  xor eax, eax
-   321                                  debug:
-   322 0000022A 3C01                    	cmp al, 1
-   323 0000022C 75FC                    	jne debug
-   324                                  	
-   325 0000022E 6631FF                  xor edi, edi	;set offset=0, first character
-   326 00000231 FB                      sti	;habilito interrupciones
-   327                                  
-   328                                  wait_keypress:
-   329 00000232 6631C0                  	xor eax, eax
-   330 00000235 A0[0F00]                	mov al, [keydown_counter]
-   331 00000238 0430                    	add al, 0x30		;convert number 1 digit to ASCII 
-   332 0000023A 26678807                	mov [es:edi], al	;print counter
-   333 0000023E 6647                    	inc edi		;attr char
-   334 00000240 B070                    	mov al, 0x70		;black char 0111 0000
-   335 00000242 26678807                	mov [es:edi], al
-   336 00000246 664F                    	dec edi
-   337                                  	
-   338 00000248 EBE8                    	jmp wait_keypress
+   222                                  ;	Codigo
+   223                                  ;***********************************
+   224                                  ;comienzo del codigo
+   225                                  inicio: 
+   226                                  ;deshabilito interruciones
+   227 00000194 FA                          cli
+   228                                  
+   229                                  ;Inicializacion PIC 1
+   230 00000195 B011                        mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
+   231 00000197 E620                        out 0x20, al
+   232 00000199 B020                        mov al, 0x20 ; icw2: INT base para el PIC N#1 tipo 20H (IRQ0 sera el tipo de interrupcion 20h)
+   233 0000019B E621                        out 0x21, al ; el PIC1 comienza en 0x20
+   234 0000019D B004                        mov al, 0x04 ; icw3: PIC N#1 Master tiene un slave conectado a IRQ2 (0000 0100b)
+   235 0000019F E621                        out 0x21, al
+   236 000001A1 B001                        mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
+   237 000001A3 E621                        out 0x21, al
+   238                                  
+   239                                  ;Inicializacion PIC 2
+   240 000001A5 B011                        mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
+   241 000001A7 E6A0                        out 0xa0, al
+   242 000001A9 B028                        mov al, 0x28 ; icw2: INT base para el PIC N#1 tipo 28h
+   243 000001AB E6A1                        out 0xa1, al ; el PIC2 comienza en 0x28
+   244 000001AD B002                        mov al, 0x02 ; icw3: PIC N#2 Slave, IRQ2 es la linea que envia al Master (010b)
+   245 000001AF E6A1                        out 0xa1, al
+   246 000001B1 B001                        mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
+   247 000001B3 E6A1                        out 0xa1, al
+   248                                  
+   249                                  ;cargo gdtr
+   250 000001B5 B81F00                  mov ax, gdtSize - 1	;longitud de gdt - 1
+   251 000001B8 A3[0300]                mov [gdtr + 0], ax		
+   252                                  
+   253 000001BB 6631C0                  xor eax, eax
+   254 000001BE B8[6400]                mov ax, gdt
+   255 000001C1 66A3[0500]              mov [gdtr + 2], eax	;ubicacion de la gdt en memoria	
+   256                                  
+   257                                  ;cargo idtr
+   258 000001C5 B80F01                  mov ax, idtSize - 1	;longitud de idt - 1
+   259 000001C8 A3[0900]                mov [idtr + 0], ax		
+   260                                  
+   261 000001CB 6631C0                  xor eax, eax	;clear bits eax
+   262 000001CE 66B8[84000000]          mov eax, idt
+   263 000001D4 66A3[0B00]              mov [idtr + 2], eax	;ubicacion de la idt en memoria	
+   264                                  
+   265                                  ; cargo en el registro gdtr (tabla global de desc)
+   266 000001D8 0F0116[0300]            lgdt [gdtr]
+   267                                  
+   268                                  ; cargo en el registro idtr load idt (tabla de INT)
+   269 000001DD 0F011E[0900]            lidt [idtr]
+   270                                  
+   271                                  ;paso a modo protegido
+   272 000001E2 0F20C0                  mov eax, cr0
+   273 000001E5 0C01                    or al,1
+   274 000001E7 0F22C0                  mov cr0, eax
+   275 000001EA EB00                    jmp short $+2
+   276                                  
+   277                                  ;cargo en cs el selector de codigo codeSel0
+   278 000001EC EA[F101]1800            jmp codeSel0:modo_protegido	;salto largo, guardo en CS el selector de codigo para modo protegido
+   279                                  
+   280                                  modo_protegido:
+   281                                  ;load ss, ds, and es with data select (used for print screen)
+   282 000001F1 B80800                  mov ax, dataSel0
+   283 000001F4 8ED0                    mov ss, ax	;como trabajo con INT debo config la PILA. SS:ESP (debo definir un area de pila)
+   284 000001F6 8ED8                    mov ds, ax
+   285                                  
+   286                                  ;guardo los datos para la pila en la direccion fin+100h. El ESP va decrementado a medida que guardo en la PILA.
+   287                                  ;si la pila ocupa mas de 100h va a comerse parte del codigo (ojo)
+   288                                  
+   289                                  ;apunto esp al final del codigo + 0x100 (100 bytes)... ahi empieza la PILA
+   290 000001F8 66B8[F2030000]          mov eax, fin + 0x100
+   291 000001FE 6689C4                  mov esp, eax
+   292                                  
+   293                                  ;enmascaro todas las interrupciones menos la irq1 (Teclado) enable -   int 9h solo dejo las que quiero usar
+   294                                  ;                                            irq0 (timer tick) disable int 8h
+   295                                  
+   296 00000201 B0FD                    mov al, 0xfd            ; Mascara PIC Master (0x21)   0xfd   1111 1101 (IRQ9) estos 8 bits es el IMR, en 0 la INT que habilito
+   297 00000203 E621                    out 0x21, al
+   298                                  
+   299 00000205 B0FF                    mov al, 0xff            ; Mascara PIC Slave (0xff)
+   300 00000207 E6A1                    out 0xa1, al
+   301                                  
+   302                                  ;cargo ds con el selector de video
+   303                                  ;Pantalla en modo inverso
+   304 00000209 B81000                  mov ax, videoSel0
+   305 0000020C 8EC0                    mov es, ax
+   306 0000020E B9D007                  mov cx, 80*25	;set count pixels
+   307 00000211 66BF00000000            mov edi, 0x00	;set index = 0 
+   308                                  
+   309                                  bucle_pantalla:
+   310 00000217 B000                      mov al, 0x00	;clear character
+   311 00000219 26678807                  mov [es:edi], al	;clear
+   312 0000021D 6647                      inc edi	;change attr
+   313 0000021F B077                      mov al, 0x77	;set attr char white and background white --> 0 111 | 0 111
+   314 00000221 26678807                  mov [es:edi], al
+   315 00000225 6647                      inc edi
+   316                                    ;ciclo hasta terminar de recorrer el buffer de video
+   317 00000227 E2EE                      loop bucle_pantalla	;cx-- and loop while cx>0
+   318                                  	
+   319 00000229 FB                      sti	;habilito interrupciones
+   320                                  
+   321                                  wait_keypress:
+   322 0000022A 6631C0                  	xor eax, eax
+   323 0000022D 6631FF                    xor edi, edi ;set offset=0, first character
+   324                                  
+   325 00000230 3EA0[6200]              	mov al, [ds:counter_decenas]
+   326 00000234 0430                    	add al, 0x30		;convert number 1 digit to ASCII 
+   327 00000236 26678807                	mov [es:edi], al	;print decenas
+   328 0000023A 6647                    	inc edi		;attr char
+   329 0000023C B070                    	mov al, 0x70		;black char 0111 0000
+   330 0000023E 26678807                	mov [es:edi], al
+   331 00000242 6647                    	inc edi ;next char
+   332                                  
+   333 00000244 3EA0[6300]                mov al, [ds:counter_unidades]
+   334 00000248 0430                    	add al, 0x30		;convert number 1 digit to ASCII 
+   335 0000024A 26678807                	mov [es:edi], al	;print unidades
+   336 0000024E 6647                    	inc edi		;attr char
+   337 00000250 B070                    	mov al, 0x70		;black char 0111 0000
+   338 00000252 26678807                	mov [es:edi], al
    339                                  
-   340                                  excHandler:
-   341                                  ;Handler que atiende la excepcion cuando se divide por cero por ej.
-   342 0000024A FA                          cli
-   343                                      ; Primero pinto toda la pantalla de azul: usare el selector de video, pero recordar que ya lo habia cargado de antes en es
-   344 0000024B B9D007                      mov cx, 80*25 ;cargo cantidad de puntos en pantalla a pintar
-   345 0000024E 66BF00000000                mov edi, 0x00 ;cargo edi en 0 porque ahora tambien borrare los caracteres, por lo tanto me movere por todos los bytes de la pantalla
-   346 00000254 66BA00000000                mov edx, 0x00
-   347                                      
-   348                                      bucle_pantalla_2: ; pinta toda la pantalla de azul
-   349 0000025A B000                        mov al, 0x00     ;poniendo el byte de caracter todo en 0 borra el caracter
-   350 0000025C 26678807                    mov [es:edi], al ;borro caracter 
-   351 00000260 6647                        inc edi          ;incremento edi para pasar al atributo
-   352 00000262 B011                        mov al, 0x11     ;cargo valor del atributo para poner cada caracter en azul y fondo en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
-   353 00000264 26678807                    mov [es:edi], al 
-   354 00000268 6647                        inc edi          ;incremento edi para pasar al otro caracter
-   355                                      ;ciclo hasta terminar de recorrer el buffer de video
-   356 0000026A E2EE                        loop bucle_pantalla_2 ; loop usa al registro cx: decrementa cx. Si cx vale mas que 0, salta a la etiqueta indicada
-   357                                      
-   358 0000026C 6631FF                      xor edi, edi ; vuelvo a poner el offset en 0, para escribir en el primer caracter
-   359 0000026F 6631C0                      xor eax, eax ; vuelvo a poner en 0 eax
-   360                                      
-   361                                      ;Ahora muestro mensaje de "error"
-   362                                      printMessage:
-   363 00000272 3E678A82[14000000]          mov al, BYTE [ds:msgException+edx] ; Leo un char del string
-   364 0000027A 3C00                        cmp al, 0                    ; Si es NULL fin del string
-   365 0000027C 7412                        je endMessage
-   366 0000027E 6642                        inc edx                      ; Muevo el indice al char siguiente
-   367 00000280 26678807                    mov [es:edi], al             ; Print char
-   368 00000284 6647                        inc edi                      ; Inc indice (Attr char)
-   369 00000286 B017                        mov al, 0x17                 ; Attr char en azul y background en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
-   370 00000288 26678807                    mov [es:edi], al
-   371 0000028C 6647                        inc edi                      ; Next char
-   372 0000028E EBE2                        jmp printMessage; vuelvo a el inicio de la etiqueta loop
-   373                                      endMessage:   
-   374 00000290 EBFE                        jmp $
-   375 00000292 FB                          sti
-   376                                    
-   377                                  
-   378                                  irq1Handler:
-   379                                  ;se pulse la tecla ‘J’ (mayúscula o minúscula indistintamente), se
-   380                                  ;ejecute cualquier operación no válida que genere una excepción. Cualquier otra
-   381                                  ;tecla, continúa la lógica planteada en el Ejercicio 2.3 (actualiza el contador en
-   382                                  ;pantalla).
-   383                                  ;analizar si la tecla presionada es 'J' -- 0x24 es el scan code de la 'j'
-   384 00000293 FA                        cli	;disable interrupts
-   385 00000294 B020                      mov al, 0x20
-   386 00000296 E620                      out 0x20, al
-   387 00000298 E460                      in al, 0x60
-   388 0000029A 3C24                      cmp al, 0x24
-   389 0000029C 7512                      jne no_jota ;si se pulso tecla distinta a jota.
-   390                                    ;aca genero excepcion, por ej, divido por cero
-   391 0000029E 6631C0                    xor eax, eax
-   392 000002A1 66BA01000000              mov edx, 1
-   393 000002A7 66B900000000              mov ecx, 0
-   394 000002AD 66F7F1                    div ecx     ;provoca excepcion 
-   395                                  
-   396                                  no_jota:
-   397                                  ;incremento contador de teclas
-   398 000002B0 6631C0                    xor eax, eax
-   399 000002B3 A0[1300]                  mov al, [key_state]
-   400 000002B6 3C00                      cmp al, 0	;zero set variable 1
-   401 000002B8 7514                      jne set_key_state
-   402                                    
-   403 000002BA B001                      mov al, 1
-   404 000002BC A2[1300]                  mov [key_state], al
-   405                                    
-   406 000002BF 6631C0                    xor eax, eax
-   407 000002C2 66A1[0F00]                mov eax, [keydown_counter]
-   408 000002C6 6640                      inc eax
-   409 000002C8 66A3[0F00]                mov [keydown_counter], eax
-   410                                    
-   411 000002CC EB05                      jmp fin_handler
-   412                                    
-   413                                  set_key_state:
-   414 000002CE B000                    	mov al, 0
-   415 000002D0 A2[1300]                	mov [key_state], al
-   416                                  
-   417                                  fin_handler:
-   418 000002D3 FB                          sti
-   419 000002D4 CF                          iret                       ; fin de la interrupcion. interrupt return
-   420                                  
-   421                                  
-   422                                  fin:            
-   423                                  
-   424                                  ; 100h mas adelante configuro el ESP de la pila. 
-   425                                   
+   340 00000256 EBD2                    	jmp wait_keypress
+   341                                  
+   342                                  excHandler:
+   343                                  ;Handler que atiende la excepcion cuando se divide por cero por ej.
+   344 00000258 FA                          cli
+   345                                      ; Primero pinto toda la pantalla de azul: usare el selector de video, pero recordar que ya lo habia cargado de antes en es
+   346 00000259 B9D007                      mov cx, 80*25 ;cargo cantidad de puntos en pantalla a pintar
+   347 0000025C 66BF00000000                mov edi, 0x00 ;cargo edi en 0 porque ahora tambien borrare los caracteres, por lo tanto me movere por todos los bytes de la pantalla
+   348 00000262 66BA00000000                mov edx, 0x00
+   349                                      
+   350                                      bucle_pantalla_2: ; pinta toda la pantalla de azul
+   351 00000268 B000                        mov al, 0x00     ;poniendo el byte de caracter todo en 0 borra el caracter
+   352 0000026A 26678807                    mov [es:edi], al ;borro caracter 
+   353 0000026E 6647                        inc edi          ;incremento edi para pasar al atributo
+   354 00000270 B011                        mov al, 0x11     ;cargo valor del atributo para poner cada caracter en azul y fondo en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
+   355 00000272 26678807                    mov [es:edi], al 
+   356 00000276 6647                        inc edi          ;incremento edi para pasar al otro caracter
+   357                                      ;ciclo hasta terminar de recorrer el buffer de video
+   358 00000278 E2EE                        loop bucle_pantalla_2 ; loop usa al registro cx: decrementa cx. Si cx vale mas que 0, salta a la etiqueta indicada
+   359                                      
+   360 0000027A 6631FF                      xor edi, edi ; vuelvo a poner el offset en 0, para escribir en el primer caracter
+   361 0000027D 6631C0                      xor eax, eax ; vuelvo a poner en 0 eax
+   362                                      
+   363                                      ;Ahora muestro mensaje de error
+   364                                      printMessage:
+   365 00000280 3E678A82[14000000]          mov al, BYTE [ds:msgException+edx] ; Leo un char del string
+   366 00000288 3C00                        cmp al, 0                    ; Si es NULL fin del string
+   367 0000028A 7412                        je endMessage
+   368 0000028C 6642                        inc edx                      ; Muevo el indice al char siguiente
+   369 0000028E 26678807                    mov [es:edi], al             ; Print char
+   370 00000292 6647                        inc edi                      ; Inc indice (Attr char)
+   371 00000294 B017                        mov al, 0x17                 ; Attr char en azul y background en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
+   372 00000296 26678807                    mov [es:edi], al
+   373 0000029A 6647                        inc edi                      ; Next char
+   374 0000029C EBE2                        jmp printMessage; vuelvo a el inicio de la etiqueta loop
+   375                                      endMessage:   
+   376 0000029E EBFE                        jmp $
+   377 000002A0 FB                          sti
+   378                                    
+   379                                  
+   380                                  irq1Handler:
+   381                                  ;se pulse la tecla ‘J’ (mayúscula o minúscula indistintamente), se
+   382                                  ;ejecute cualquier operación no válida que genere una excepción. Cualquier otra
+   383                                  ;tecla, continúa la lógica planteada en el Ejercicio 2.3 (actualiza el contador en
+   384                                  ;pantalla).
+   385                                  ;analizar si la tecla presionada es 'J' -- 0x24 es el scan code de la 'j'
+   386 000002A1 FA                        cli	;disable interrupts
+   387 000002A2 B020                      mov al, 0x20
+   388 000002A4 E620                      out 0x20, al
+   389 000002A6 E460                      in al, 0x60
+   390 000002A8 3C24                      cmp al, 0x24
+   391 000002AA 7512                      jne no_jota ;si se pulso tecla distinta a jota.
+   392                                    ;aca genero excepcion, por ej, divido por cero
+   393 000002AC 6631C0                    xor eax, eax
+   394 000002AF 66BA01000000              mov edx, 1
+   395 000002B5 66B900000000              mov ecx, 0
+   396 000002BB 66F7F1                    div ecx     ;provoca excepcion 
+   397                                  
+   398                                  no_jota:
+   399                                  ;incremento contador de teclas
+   400 000002BE 6631C0                    xor eax, eax
+   401 000002C1 A0[1300]                  mov al, [key_state]
+   402 000002C4 3C00                      cmp al, 0	;zero set variable 1
+   403 000002C6 7523                      jne set_key_state
+   404                                    
+   405 000002C8 B001                      mov al, 1
+   406 000002CA A2[1300]                  mov [key_state], al
+   407                                    
+   408 000002CD 6631C0                    xor eax, eax
+   409 000002D0 66A1[0F00]                mov eax, [keydown_counter]
+   410 000002D4 6640                      inc eax
+   411 000002D6 66A3[0F00]                mov [keydown_counter], eax
+   412                                  
+   413                                    ;separo en unidades y decenas, divido por 10
+   414 000002DA B30A                      mov bl, 10 ;divido contador por 10
+   415 000002DC B400                      mov ah, 0
+   416 000002DE F6F3                      div bl ;ax/bx
+   417 000002E0 3EA2[6200]                mov [ds:counter_decenas], al ;cociente 
+   418 000002E4 3E8826[6300]              mov [ds:counter_unidades], ah ;resto
+   419                                    
+   420 000002E9 EB05                      jmp fin_handler
+   421                                    
+   422                                  set_key_state:
+   423 000002EB B000                    	mov al, 0
+   424 000002ED A2[1300]                	mov [key_state], al
+   425                                  
+   426                                  fin_handler:
+   427 000002F0 FB                          sti
+   428 000002F1 CF                          iret                       ; fin de la interrupcion. interrupt return
+   429                                  
+   430                                  
+   431                                  fin:            
+   432                                  
+   433                                  ; 100h mas adelante configuro el ESP de la pila. 
+   434                                   
