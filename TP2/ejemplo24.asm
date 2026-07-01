@@ -387,7 +387,7 @@ irq1Handler:
   mov al, 0x20
   out 0x20, al
   in al, 0x60
-  cmp al, 0x24
+  cmp al, 0x24 ;003C (00BD es breakcode) es F2 003D es F3
   jne no_jota ;si se pulso tecla distinta a jota.
   ;aca genero excepcion, por ej, divido por cero
   xor eax, eax

@@ -1,0 +1,1496 @@
+     1                                  ;*******************************************************
+     2                                  ;Ej 2-7
+     3                                  ;Tome el programa del Ejercicio 2.5 o del Ejercicio 2.6 (elija el que prefiera), y modifíquelo para que ambas tareas ejecuten, en un segmento de RPL = 11.
+     4                                  ;Las tareas dejarán de presentar su tiempo de ejecución y mediante el acceso a dos servicios (Fecha y Hora) implementados en el segmento de código de RPL = 00, accediendo directamente al Real Time Clock de la PC. Las tareas presentarán:
+     5                                  ;Tarea 1: Periódicamente, presenta la Hora del Sistema en la posición de pantalla Fila 8 Columna 35, en el formato hh:mm:ss.
+     6                                  ;Tarea 2: Periódicamente, presenta Fecha y Hora del Sistema en la posición de pantalla Fila 16 Columna 35 en formato dd:mm:aaaaa y en Fila 17 Columna 35 en formato hh:mm:ss. Ídem Servicio Hora del Sistema.
+     7                                  ;Tarea 3: Envía cada 1 segundo por puerto serie la hora del sistema.
+     8                                  ;Las tareas, descriptas se seguirán ejecutando de acuerdo al esquema de manejo de prioridades establecido en el Ejercicio 2.5 o en el Ejercicio 2.6 según haya sido su elección.
+     9                                  ;El programa finaliza cuando se pulsa la tecla F10, o cuando alguna de las dos tareas llega a los 3 minutos de operación efectiva.
+    10                                  ;Recuerde que HLT es una instrucción privilegiada, por lo que este comando se debe ejecutar desde una rutina que corra en anillo 0.
+    11                                  ;*******************************************************
+    12                                  
+    13                                  use16 ;codigo 16 bits
+    14                                  org 8000h ;offset del codigo en 0x8000
+    15 00000000 E90F04                  jmp inicio ;voy a inicio (salteo variables)
+    16                                  
+    17                                  tick50                 equ       5 ;config base ticks
+    18                                  MAX_TIME_EXEC_TASK     equ       180 ;180seg = 3min. Tiempo maximo de tarea.
+    19                                  TIME_EXEC_SERIAL_PORT  equ       1000 ;1000mSeg = 1seg. Tiempo para ejecutar tarea pto. serie.
+    20                                  COLOR_BG               equ       0x60
+    21                                  COLOR_BG_EXCEPTION     equ       0x11
+    22                                  
+    23                                  ;***********************************
+    24                                  ;	variables
+    25                                  ;***********************************
+    26 00000003 <res 00000006>          gdtr	                   resb	     6
+    26          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    27 00000009 <res 00000006>          idtr 	                   resb      6
+    27          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    28 0000000F 00                      keyPressState                 db        0
+    29 00000010 00                      counterTicksTask1        db	       0 ; para almacenar contador de ticks de la tarea 1
+    30 00000011 00                      counterTicksTask2        db        0 ; para almacenar contador de ticks de la tarea 2
+    31 00000012 0000                    timeSerialPort           dw        0 ; para almacenar contador de tiempo de la tarea de puerto serie (cada 1s)
+    32 00000014 05                      ticksMaxTask1            db        tick50 ; para almacenar el porcentaje de tiempo que debe conmutar a Tarea 1, inicialmente arranca en 50%
+    33 00000015 05                      ticksMaxTask2            db        tick50 ; para almacenar el porcentaje de tiempo que debe conmutar a Tarea 2, inicialmente arranca en 50%
+    34 00000016 0000                    timeMilsTask1            dw        0 ; para almacenar milesimas de segundo de tiempo tarea 1
+    35 00000018 0000                    timeMilsTask2            dw        0 ; para almacenar milesimas de segundo de tiempo tarea 2
+    36 0000001A 0000                    timeMaxTask1             dw        0 ; para almacenar tiempo maximo en segundos de tarea 1 (180s)
+    37 0000001C 0000                    timeMaxTask2             dw        0 ; para almacenar tiempo maximo en segundos de tarea 2 (180s)
+    38 0000001E 4120666174616C2065-     msgException             db        'A fatal exception DE has occurred. The current application will be terminated.'
+    38 00000027 7863657074696F6E20-
+    38 00000030 444520686173206F63-
+    38 00000039 6375727265642E2054-
+    38 00000042 68652063757272656E-
+    38 0000004B 74206170706C696361-
+    38 00000054 74696F6E2077696C6C-
+    38 0000005D 206265207465726D69-
+    38 00000066 6E617465642E       
+    39 0000006C 00                      endOfString              db        0 ; Null, fin del string a imprimir
+    40                                  
+    41 0000006D 00                      secondsRTC               db        0 ;
+    42 0000006E 00                      unitSeconds              db        0 ; 
+    43 0000006F 00                      tenSeconds               db        0 ; 
+    44                                  
+    45 00000070 00                      minutesRTC               db        0 ;
+    46 00000071 00                      unitMinutes              db        0 ; 
+    47 00000072 00                      tenMinutes               db        0 ; 
+    48                                  
+    49 00000073 00                      hourRTC                  db        0 ;
+    50 00000074 00                      unitHour                 db        0 ; 
+    51 00000075 00                      tenHour                  db        0 ;
+    52                                  
+    53 00000076 00                      dayRTC                   db        0 ; 
+    54 00000077 00                      unitDay                  db        0 ; 
+    55 00000078 00                      tenDays                  db        0 ; 
+    56                                  
+    57 00000079 00                      monthRTC                 db        0 ;
+    58 0000007A 00                      unitMonth                db        0 ; 
+    59 0000007B 00                      tenMonth                 db        0 ; 
+    60                                  
+    61 0000007C 0000                    yearRTC                  dw        0 ;
+    62 0000007E 00                      unitYear                 db        0 ; 
+    63 0000007F 00                      tenYear                  db        0 ;
+    64 00000080 00                      hundredYear              db        0 ;
+    65 00000081 02                      milsYear                 db        2 ; 
+    66                                  
+    67                                  ;***********************************
+    68                                  ; Scan Codes de los Make de teclas
+    69                                  ;***********************************
+    70                                  KEY_J_MakeCode         equ       0x24
+    71                                  KEY_W_MakeCode         equ       0x11 ;se cambiaron F2,F3 y F10 por problema con teclado de laptop
+    72                                  KEY_E_MakeCode         equ       0x12
+    73                                  KEY_Q_MakeCode         equ       0x10
+    74                                  
+    75                                  ;***********************************
+    76                                  ; TSS
+    77                                  ;***********************************
+    78                                  ;tss de la tarea inicial
+    79 00000082 <res 00000068>          tssTaskInit_Lvl0  resb 68h ; reservo 68 hexabytes sin nada por ser la tarea inicial
+    79          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+    80                                  
+    81                                  ;tss del Scheduler --> Es de Nivel 0 
+    82 000000EA 00000000                tssScheduler_Lvl0 dd 0
+    83 000000EE 00000000                    dd 0                 ;esp0 
+    84 000000F2 0000                        dw 0                 ;ss0
+    85 000000F4 0000                        dw 0
+    86 000000F6 00000000                    dd 0                 ;esp1 (dd: define double --> 32 bits) --> no necesito pila de anillo 1, pues estoy en anillo 0
+    87 000000FA 00000000                    dd 0                 ;ss1 
+    88 000000FE 00000000                    dd 0                 ;esp2 --> no necesito pila de anillo 2, pues estoy en anillo 0
+    89 00000102 00000000                    dd 0                 ;ss2
+    90 00000106 00000000                    dd 0                 ;cr3
+    91 0000010A [CC040000]                  dd irq0Handler       ;eip --> Instruction Pointer --> debera arrancar en irq0Handler al conmutar
+    92 0000010E 02020000                    dd 0x202             ;eflags --> habilita Flag de interrupcion
+    93 00000112 00000000                    dd 0                 ;eax
+    94 00000116 00000000                    dd 0                 ;ecx
+    95 0000011A 00000000                    dd 0                 ;edx
+    96 0000011E 00000000                    dd 0                 ;ebx
+    97 00000122 [080D0000]                  dd stackSch_Lvl0+0xff ;esp  --> La pila se configura con ss:esp --> dataSel0:pilaSchNiv0+0xff (de 0 a 99 (ff) y luego al final reserva 100h)
+    98 00000126 00000000                    dd 0                 ;ebp
+    99 0000012A 00000000                    dd 0                 ;esi
+   100 0000012E 00000000                    dd 0                 ;edi
+   101 00000132 0000                        dw 0                 ;es --> no pongo videoSel pues el Scheduler no pintara la pantalla, lo hara el codigo de la call gate
+   102 00000134 0000                        dw 0
+   103 00000136 2000                        dw codeSel_Lvl0      ;cs
+   104 00000138 0000                        dw 0
+   105 0000013A 0800                        dw dataSel_Lvl0      ;ss
+   106 0000013C 0000                        dw 0
+   107 0000013E 0800                        dw dataSel_Lvl0      ;ds --> lo usare para las variables 
+   108 00000140 0000                        dw 0 
+   109 00000142 00000000                    dd 0                 ;fs
+   110 00000146 00000000                    dd 0                 ;gs
+   111 0000014A 00000000                    dd 0
+   112 0000014E 00000000                    dd 0
+   113                                  
+   114                                  ;tss de la tara que envia al puerto serie --> Es de Nivel 0 
+   115 00000152 00000000                tssTaskSerialPort_Lvl0 dd 0
+   116 00000156 00000000                    dd 0        ;esp0 
+   117 0000015A 0000                        dw 0        ;ss0
+   118 0000015C 0000                        dw 0
+   119 0000015E 00000000                    dd 0        ;esp1 (dd: define double --> 32 bits) --> no necesito pila de anillo 1, pues estoy en anillo 0
+   120 00000162 00000000                    dd 0        ;ss1 
+   121 00000166 00000000                    dd 0        ;esp2 --> no necesito pila de anillo 2, pues estoy en anillo 0
+   122 0000016A 00000000                    dd 0        ;ss2
+   123 0000016E 00000000                    dd 0        ;cr3
+   124 00000172 [17060000]                  dd serialPortHandler  ;eip --> Instruction Pointer --> debera arrancar en irq0Handler al conmutar
+   125 00000176 02020000                    dd 0x202    ;eflags --> habilita Flag de interrupcion
+   126 0000017A 00000000                    dd 0        ;eax
+   127 0000017E 00000000                    dd 0        ;ecx
+   128 00000182 00000000                    dd 0        ;edx
+   129 00000186 00000000                    dd 0        ;ebx
+   130 0000018A [080E0000]                  dd stackSerialPort_Lvl0+0xff ;esp  --> 
+   131 0000018E 00000000                    dd 0        ;ebp
+   132 00000192 00000000                    dd 0        ;esi
+   133 00000196 00000000                    dd 0        ;edi
+   134 0000019A 0000                        dw 0        ;es 
+   135 0000019C 0000                        dw 0
+   136 0000019E 2000                        dw codeSel_Lvl0 ;cs
+   137 000001A0 0000                        dw 0
+   138 000001A2 0800                        dw dataSel_Lvl0 ;ss
+   139 000001A4 0000                        dw 0
+   140 000001A6 0800                        dw dataSel_Lvl0 ;ds --> lo usare para las variables 
+   141 000001A8 0000                        dw 0 
+   142 000001AA 00000000                    dd 0        ;fs
+   143 000001AE 00000000                    dd 0        ;gs
+   144 000001B2 00000000                    dd 0
+   145 000001B6 00000000                    dd 0
+   146                                  
+   147                                  ;tss de la tarea 1 (anillo 3) --> Debo configurar pilas de nivel 0 y 3. Por medio de CG va a anillo 0.
+   148 000001BA 00000000                tssTask1_Lvl3 dd 0
+   149 000001BE [080F0000]                  dd stackTask1_Lvl0+0xff     ;esp0 --> aca pongo la pila de nivel 0
+   150 000001C2 0800                        dw dataSel_Lvl0             ;ss0
+   151 000001C4 0000                        dw 0
+   152 000001C6 00000000                    dd 0       ;esp1
+   153 000001CA 00000000                    dd 0       ;ss1
+   154 000001CE 00000000                    dd 0       ;esp2
+   155 000001D2 00000000                    dd 0       ;ss2
+   156 000001D6 00000000                    dd 0       ;cr3
+   157 000001DA [3D060000]                  dd Task1_Lvl3  ;eip
+   158 000001DE 02020000                    dd 0x202   ;eflags
+   159 000001E2 00000000                    dd 0       ;eax
+   160 000001E6 00000000                    dd 0       ;ecx
+   161 000001EA 00000000                    dd 0       ;edx
+   162 000001EE 00000000                    dd 0       ;ebx
+   163 000001F2 FF000000                    dd 0xff    ;esp --> aca pongo la pila de nivel 3 propia de esta tarea: SS:ESP --> pilaSel_Niv3:0xff
+   164 000001F6 00000000                    dd 0       ;ebp
+   165 000001FA 00000000                    dd 0       ;esi
+   166 000001FE 00000000                    dd 0       ;edi
+   167 00000202 0000                        dw 0       ;es
+   168 00000204 0000                        dw 0
+   169 00000206 2B00                        dw codeSel_Lvl3    ;cs
+   170 00000208 0000                        dw 0
+   171 0000020A 4300                        dw stackSelT1_Lvl3 ;ss --> Selector del descriptor de datos de la pila de la tarea 1
+   172 0000020C 0000                        dw 0
+   173 0000020E 0000                        dw 0       ;ds --> no uso DS en la tarea de anillo 3 pues solo llama a la call gate de anillo 0, por lo tanto no usa datos niv3
+   174 00000210 0000                        dw 0 
+   175 00000212 00000000                    dd 0       ;fs
+   176 00000216 00000000                    dd 0       ;gs
+   177 0000021A 00000000                    dd 0
+   178 0000021E 00000000                    dd 0  
+   179                                  
+   180                                  ;tss de la tarea 2 (anillo 3) --> Debo configurar pilas de nivel 0 y 3. Por medio de CG va a anillo 0.
+   181 00000222 00000000                tssTask2_Lvl3 dd 0
+   182 00000226 [08100000]                  dd stackTask2_Lvl0+0xff   ;esp0 --> aca pongo la pila de nivel 0
+   183 0000022A 0800                        dw dataSel_Lvl0           ;ss0
+   184 0000022C 0000                        dw 0
+   185 0000022E 00000000                    dd 0                      ;esp1
+   186 00000232 00000000                    dd 0                      ;ss1
+   187 00000236 00000000                    dd 0                      ;esp2
+   188 0000023A 00000000                    dd 0                      ;ss2
+   189 0000023E 00000000                    dd 0                      ;cr3
+   190 00000242 [44060000]                  dd Task2_Lvl3            ;eip
+   191 00000246 02020000                    dd 0x202                  ;eflags
+   192 0000024A 00000000                    dd 0                      ;eax
+   193 0000024E 00000000                    dd 0                      ;ecx
+   194 00000252 00000000                    dd 0                      ;edx
+   195 00000256 00000000                    dd 0                      ;ebx
+   196 0000025A FF000000                    dd 0xff                   ;esp --> aca pongo la pila de nivel 3 propia de esta tarea: SS:ESP --> pilaSel_Niv3:0xff
+   197 0000025E 00000000                    dd 0                      ;ebp
+   198 00000262 00000000                    dd 0                      ;esi
+   199 00000266 00000000                    dd 0                      ;edi
+   200 0000026A 0000                        dw 0                      ;es
+   201 0000026C 0000                        dw 0
+   202 0000026E 2B00                        dw codeSel_Lvl3           ;cs
+   203 00000270 0000                        dw 0
+   204 00000272 4B00                        dw stackSelT2_Lvl3         ;ss --> Selector del descriptor de datos de la pila de la tarea 2
+   205 00000274 0000                        dw 0
+   206 00000276 1000                        dw dataSel_Lvl3           ;ds --> no uso DS en la tarea de anillo 3 pues solo llama a la call gate de anillo 0, por lo tanto no usa datos niv3
+   207 00000278 0000                        dw 0 
+   208 0000027A 00000000                    dd 0                      ;fs
+   209 0000027E 00000000                    dd 0                      ;gs
+   210 00000282 00000000                    dd 0
+   211 00000286 00000000                    dd 0 
+   212                                  
+   213                                  ;***********************************
+   214                                  ;	GDT
+   215                                  ;***********************************
+   216                                  gdt: ; direccion base de la gdt
+   217 0000028A <res 00000008>            resb 8 ;descriptor nulo
+   217          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   218                                  
+   219                                  ; descriptor de datos de nivel 0 (Base: 0, size 64k, nivel 0)
+   220                                  dataSel_Lvl0 equ $-gdt ; selector del descriptor de segmento de datos de nivel 0 --> index = 1, TI = 0, RPL = 00 (Niv 0)
+   221 00000292 FFFF                      dw 0xffff     ; limite parte baja = 65536 = 64k
+   222 00000294 0000                      dw 0x0000     ; primeros 2 bytes base = 0
+   223 00000296 00                        db 0x00       ; 3er byte base = 0
+   224 00000297 92                        db 10010010b  ; atributos: P=1 DPL=00 S=1 TIṔO=001 (E=0 por lo tanto es segmento de datos, ED=0, W=1 por lo tanto puedo escribir) A=0 
+   225 00000298 00                        db 0x00       ; parte alta atributos = 0
+   226 00000299 00                        db 0x00       ; 4to byte base = 0
+   227                                  
+   228                                  ; descriptor de datos de nivel 3 (Base: 0, size 100h, nivel 0)
+   229                                  dataSel_Lvl3 equ $-gdt ; selector del descriptor de segmento de datos de nivel 3 --> index = 2, TI = 0, RPL = 11 (Niv 3)
+   230 0000029A FF00                      dw 0x00ff     ; limite parte baja = 255 = 0xff --> limite + 1 = 256 = 0x100 = 100h
+   231 0000029C [0910]                    dw data_anillo3 ; otra forma de definir la base, con una etiqueta
+   232 0000029E 00                        db 0x00       ; 3er byte base = 0
+   233 0000029F F2                        db 11110010b  ; atributos: P=1 DPL=11 S=1 TIṔO=001 (E=0 por lo tanto es segmento de datos, ED=0, W=1 por lo tanto puedo escribir) A=0 
+   234 000002A0 00                        db 0x00       ; parte alta atributos = 0
+   235 000002A1 00                        db 0x00       ; 4to byte base = 0
+   236                                  
+   237                                  ; descriptor de video (Base: 0xb8000, size 4k, nivel 0)
+   238                                  videoSel_Lvl0 equ $-gdt ; selector del descriptor de segmento de datos de video de nivel 0 --> index = 3, TI = 0, RPL = 00
+   239 000002A2 0010                      dw 0x1000     ; limite parte baja = 4096 = 4k
+   240 000002A4 0080                      dw 0x8000     ; base = 0xb8000, en los primeros 2 bytes pongo 8000
+   241 000002A6 0B                        db 0x0b       ; en el 3er byte pongo b
+   242 000002A7 92                        db 10010010b  ; atributos: P=1 DPL=00 S=1 TIṔO=001 (E=0 por lo tanto es segmento de datos, ED=0, W=1 por lo tanto puedo escribir) A=0
+   243 000002A8 00                        db 0x00       ; parte alta atributos = 0
+   244 000002A9 00                        db 0x00       ; 4to byte base = 0
+   245                                  
+   246                                  ; descriptor de codigo de nivel 0 (Base: 0x0000, size 64k, nivel 0) para el handler de IRQ0
+   247                                  codeSel_Lvl0 equ $-gdt ; selector del descriptor de segmento de codigo --> index = 4, TI = 0, RPL = 00
+   248 000002AA FFFF                      dw 0xffff     ; limite parte baja = 65536 = 64k
+   249 000002AC 0000                      dw 0x0000     ; primeros 2 bytes base = 0
+   250 000002AE 00                        db 0x00       ; 3er byte base = 0
+   251 000002AF 9A                        db 10011010b  ; atributos: P=1 DPL=00 S=1 TIPO=101 (E=1 por lo tanto es segmento de codigo, C=0, R=1 por lo tanto puedo leer y ejecutar) A=0
+   252 000002B0 00                        db 0x00       ; parte alta atributos = 0
+   253 000002B1 00                        db 0x00       ; 4to byte base = 0
+   254                                  
+   255                                  ; descriptor de codigo de nivel 3 (Base: 0x0000, size 64k, nivel 3), para el codigo de las tareas
+   256                                  codeSel_Lvl3 equ $-gdt + 3  ; Selector con RPL=3 
+   257 000002B2 FFFF                      dw 0xffff     ; limite parte baja = 65536 = 64k
+   258 000002B4 0000                      dw 0x0000     ; primeros 2 bytes base = 0
+   259 000002B6 00                        db 0x00       ; 3er byte base = 0
+   260 000002B7 FA                        db 11111010b  ; atributos: P=1 DPL=11 S=1 TIPO=101 (E=1 por lo tanto es segmento de codigo, C=0, R=1 por lo tanto puedo leer y ejecutar) A=0
+   261 000002B8 00                        db 0x00       ; parte alta atributos = 0
+   262 000002B9 00                        db 0x00       ; 4to byte base = 0
+   263                                  
+   264                                  ; callgate para escribir contador de tarea 1 en parte superior --> El codigo de anillo 3 de la tarea 1 usara estara call gate para ejecutar codigo de niv 0
+   265                                  cgPrintScreenUp equ $-gdt +3 ; Selector con RPL=3  (lo pongo con ese +3)
+   266 000002BA [4B06]                    dw printScreenUp ; offset
+   267 000002BC 2000                      dw codeSel_Lvl0          ; selector del codigo de nivel 0 al que accede esta call gate
+   268 000002BE 00                        db 0             
+   269 000002BF E4                        db 11100100b             ; P=1 ; DPL = 11 ; S = 0 ; TIPO = 0100 (Call Gate 16 bits)
+   270 000002C0 0000                      dw 0
+   271                                  
+   272                                  ; callgate para limpiar la pantalla (DPL = 3)  --> El codigo de anillo 3 de la tarea 2 usara estara call gate para ejecutar codigo de la tarea de niv 0
+   273                                  cgPrintScreenDown equ $-gdt +3 ; Selector con RPL=3  (lo pongo con ese +3)
+   274 000002C2 [7107]                    dw printScreenDown ; offset
+   275 000002C4 2000                      dw codeSel_Lvl0          ; selector del codigo de nivel 0 al que accede esta call gate
+   276 000002C6 00                        db 0             
+   277 000002C7 E4                        db 11100100b             ; P=1 ; DPL = 11 ; S = 0 ; TIPO = 0100 (Call Gate 16 bits)
+   278 000002C8 0000                      dw 0
+   279                                  
+   280                                  ; descriptor de datos para la pila de nivel 3 de Tarea 1 (Base: pilaTarea1_Niv3, size 100h, nivel 3) 
+   281                                  stackSelT1_Lvl3 equ $-gdt + 3 ; Selector INDEX-TI-RPL con RPL=3 
+   282 000002CA FF00                      dw 0x00ff          ; tamano 100h bytes
+   283 000002CC [0911]                    dw stackTask1_Lvl3 ; base de esta pila
+   284 000002CE 00                        db 0x00
+   285 000002CF F2                        db 11110010b       ;atributos: P=1 DPL=11 S=1 TIṔO=001 (E=0 por lo tanto es segmento de datos, ED=0, W=1 por lo tanto puedo escribir) A=0
+   286 000002D0 00                        db 0x00
+   287 000002D1 00                        db 0x00
+   288                                  
+   289                                  ; descriptor de datos para la pila de nivel 3 de Tarea 2 (Base: pilaTarea2_Niv3, size 100h, nivel 3) 
+   290                                  stackSelT2_Lvl3 equ $-gdt + 3 ; Selector INDEX-TI-RPL con RPL=3 
+   291 000002D2 FF00                      dw 0x00ff          ; tamano 100h bytes
+   292 000002D4 [0912]                    dw stackTask2_Lvl3 ; base de esta pila
+   293 000002D6 00                        db 0x00
+   294 000002D7 F2                        db 11110010b       ;atributos: P=1 DPL=11 S=1 TIṔO=001 (E=0 por lo tanto es segmento de datos, ED=0, W=1 por lo tanto puedo escribir) A=0
+   295 000002D8 00                        db 0x00
+   296 000002D9 00                        db 0x00
+   297                                  
+   298                                  ;------ Descriptores de TSS --------
+   299                                  ; Todos los selectores van con RPL=0 !! --> TSS siempre en anillo 0
+   300                                  
+   301                                  tssTaskInit_Lvl0_Sel equ $ -gdt ; selector que se cargara en el registro TR que es el selector del descriptor de TSS de la tarea actual
+   302 000002DA 6700                      dw 67h                  ; Limite o tamaño del descriptor
+   303 000002DC [8200]                    dw tssTaskInit_Lvl0 ; Base del descriptor 
+   304 000002DE 00                        db 0 
+   305 000002DF 89                        db 10001001b            ; SIEMPRE CON RPL = DPL = 00
+   306 000002E0 00                        db 0
+   307 000002E1 00                        db 0
+   308                                  
+   309                                  tssScheduler_Lvl0_Sel equ $ -gdt
+   310 000002E2 6700                      dw 67h
+   311 000002E4 [EA00]                    dw tssScheduler_Lvl0
+   312 000002E6 00                        db 0
+   313 000002E7 89                        db 10001001b            ; SIEMPRE CON RPL = DPL = 00
+   314 000002E8 00                        db 0
+   315 000002E9 00                        db 0
+   316                                  
+   317                                  tssTaskSerialPort_Lvl0_Sel equ $ -gdt
+   318 000002EA 6700                      dw 67h
+   319 000002EC [5201]                    dw tssTaskSerialPort_Lvl0
+   320 000002EE 00                        db 0
+   321 000002EF 89                        db 10001001b            ; SIEMPRE CON RPL = DPL = 00
+   322 000002F0 00                        db 0
+   323 000002F1 00                        db 0
+   324                                  
+   325                                  tssTask1_Lvl3_Sel equ $ -gdt
+   326 000002F2 6700                      dw 67h
+   327 000002F4 [BA01]                    dw tssTask1_Lvl3
+   328 000002F6 00                        db 0
+   329 000002F7 89                        db 10001001b            ; SIEMPRE CON RPL = DPL = 00
+   330 000002F8 00                        db 0
+   331 000002F9 00                        db 0
+   332                                  
+   333                                  tssTask2_Lvl3_Sel equ $ -gdt   
+   334 000002FA 6700                      dw 67h
+   335 000002FC [2202]                    dw tssTask2_Lvl3
+   336 000002FE 00                        db 0
+   337 000002FF 89                        db 10001001b            ; SIEMPRE CON RPL = DPL = 00
+   338 00000300 00                        db 0
+   339 00000301 00                        db 0
+   340                                  
+   341                                  
+   342                                  ;tamaño de la gdt
+   343                                  gdtSize equ $-gdt
+   344                                  
+   345                                  
+   346                                  ;***********************************
+   347                                  ;	IDT
+   348                                  ;***********************************
+   349                                  idt: ;direccion base de la idt
+   350                                    ;A continuacion defino todas las puertas de excepcion predefinidas en el uP --> todas usaran el mismo handler, mismo selector pero el bit TIPO de atributos ahora sera 0111: 16 bits trap gate
+   351                                    
+   352                                    ;Excepcion 0: Divide Error
+   353 00000302 [630A]                      dw excHandler0  ; Offset donde esta el Handler que atendera las excepciones
+   354 00000304 2000                        dw codeSel_Lvl0
+   355 00000306 00                          db 0
+   356 00000307 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   357 00000308 0000                        dw 0x00
+   358                                      
+   359                                    ;Excepcion 1: Debug
+   360 0000030A [670A]                      dw excHandler1  ; Offset donde esta el Handler que atendera las excepciones
+   361 0000030C 2000                        dw codeSel_Lvl0
+   362 0000030E 00                          db 0
+   363 0000030F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   364 00000310 0000                        dw 0x00
+   365                                  
+   366 00000312 <res 00000008>              resb 8 ; Aca dejo espacio libre pues es la Interrupcion 2
+   366          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   367                                      
+   368                                    ;Excepcion 3: Breakpoint
+   369 0000031A [6B0A]                      dw excHandler3  ; Offset donde esta el Handler que atendera las excepciones
+   370 0000031C 2000                        dw codeSel_Lvl0
+   371 0000031E 00                          db 0
+   372 0000031F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   373 00000320 0000                        dw 0x00
+   374                                  
+   375                                    ;Excepcion 4: Overflow
+   376 00000322 [6F0A]                      dw excHandler4  ; Offset donde esta el Handler que atendera las excepciones
+   377 00000324 2000                        dw codeSel_Lvl0
+   378 00000326 00                          db 0
+   379 00000327 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   380 00000328 0000                        dw 0x00
+   381                                  
+   382                                    ;Excepcion 5: Bound Range Exceed
+   383 0000032A [730A]                      dw excHandler5  ; Offset donde esta el Handler que atendera las excepciones
+   384 0000032C 2000                        dw codeSel_Lvl0
+   385 0000032E 00                          db 0
+   386 0000032F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   387 00000330 0000                        dw 0x00
+   388                                  
+   389                                    ;Excepcion 6: Invalid Opcode
+   390 00000332 [770A]                      dw excHandler6  ; Offset donde esta el Handler que atendera las excepciones
+   391 00000334 2000                        dw codeSel_Lvl0
+   392 00000336 00                          db 0
+   393 00000337 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   394 00000338 0000                        dw 0x00
+   395                                      
+   396                                    ;Excepcion 7: Device not available
+   397 0000033A [7B0A]                      dw excHandler7  ; Offset donde esta el Handler que atendera las excepciones
+   398 0000033C 2000                        dw codeSel_Lvl0
+   399 0000033E 00                          db 0
+   400 0000033F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   401 00000340 0000                        dw 0x00
+   402                                  
+   403                                    ;Excepcion 8: Double Fault
+   404 00000342 [7F0A]                      dw excHandler8  ; Offset donde esta el Handler que atendera las excepciones
+   405 00000344 2000                        dw codeSel_Lvl0
+   406 00000346 00                          db 0
+   407 00000347 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   408 00000348 0000                        dw 0x00
+   409                                  
+   410                                    ;Excepcion 9: Coproccesor segment overrun
+   411 0000034A [830A]                      dw excHandler9  ; Offset donde esta el Handler que atendera las excepciones
+   412 0000034C 2000                        dw codeSel_Lvl0
+   413 0000034E 00                          db 0
+   414 0000034F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   415 00000350 0000                        dw 0x00
+   416                                  
+   417                                    ;Excepcion 10: Invalid TSS
+   418 00000352 [870A]                      dw excHandler10  ; Offset donde esta el Handler que atendera las excepciones
+   419 00000354 2000                        dw codeSel_Lvl0
+   420 00000356 00                          db 0
+   421 00000357 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   422 00000358 0000                        dw 0x00
+   423                                  
+   424                                    ;Excepcion 11: Segment Not Present
+   425 0000035A [8B0A]                      dw excHandler11  ; Offset donde esta el Handler que atendera las excepciones
+   426 0000035C 2000                        dw codeSel_Lvl0
+   427 0000035E 00                          db 0
+   428 0000035F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   429 00000360 0000                        dw 0x00
+   430                                  
+   431                                    ;Excepcion 12: Stack Segment
+   432 00000362 [8F0A]                      dw excHandler12  ; Offset donde esta el Handler que atendera las excepciones
+   433 00000364 2000                        dw codeSel_Lvl0
+   434 00000366 00                          db 0
+   435 00000367 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   436 00000368 0000                        dw 0x00
+   437                                  
+   438                                    ;Excepcion 13: General Protection
+   439 0000036A [930A]                      dw excHandler13  ; Offset donde esta el Handler que atendera las excepciones
+   440 0000036C 2000                        dw codeSel_Lvl0
+   441 0000036E 00                          db 0
+   442 0000036F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   443 00000370 0000                        dw 0x00
+   444                                  
+   445                                    ;Excepcion 14: Page Fault
+   446 00000372 [970A]                      dw excHandler14  ; Offset donde esta el Handler que atendera las excepciones
+   447 00000374 2000                        dw codeSel_Lvl0
+   448 00000376 00                          db 0
+   449 00000377 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   450 00000378 0000                        dw 0x00
+   451                                      
+   452 0000037A <res 00000008>              resb 8         ; la 15 esta reservada
+   452          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   453                                  
+   454                                    ;Excepcion 16: Floating Point Error
+   455 00000382 [9B0A]                      dw excHandler16  ; Offset donde esta el Handler que atendera las excepciones
+   456 00000384 2000                        dw codeSel_Lvl0
+   457 00000386 00                          db 0
+   458 00000387 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   459 00000388 0000                        dw 0x00
+   460                                  
+   461                                    ;Excepcion 17: Alignment Check
+   462 0000038A [9F0A]                      dw excHandler17  ; Offset donde esta el Handler que atendera las excepciones
+   463 0000038C 2000                        dw codeSel_Lvl0
+   464 0000038E 00                          db 0
+   465 0000038F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   466 00000390 0000                        dw 0x00
+   467                                  
+   468                                    ;Excepcion 18: Machine Check
+   469 00000392 [A30A]                      dw excHandler18  ; Offset donde esta el Handler que atendera las excepciones
+   470 00000394 2000                        dw codeSel_Lvl0
+   471 00000396 00                          db 0
+   472 00000397 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   473 00000398 0000                        dw 0x00
+   474                                  
+   475                                    ;Excepcion 19: SIMD Floating Point Exception
+   476 0000039A [A70A]                      dw excHandler19  ; Offset donde esta el Handler que atendera las excepciones
+   477 0000039C 2000                        dw codeSel_Lvl0
+   478 0000039E 00                          db 0
+   479 0000039F 87                          db 0x87        ; 0x87 = 1000 0111 --> P=1 ; DPL=00 ; S=0 ; TIPO=0111
+   480 000003A0 0000                        dw 0x00
+   481                                      
+   482 000003A2 <res 00000060>              resb 8*12      ; de la 20 a la 31 estan reservadas (son 12)
+   482          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+   483                                  
+   484                                    ;descriptor de puerta de tarea en 0x20 (irq0, timer tick)
+   485 00000402 0000                        dw 0
+   486 00000404 5800                        dw tssScheduler_Lvl0_Sel ; Selector a descriptor de TSS del Scheduler que conmutara con el timertick
+   487 00000406 00                          db 0
+   488 00000407 85                          db 10000101b    ; Puertas de tarea en este caso va en con DPL = 00
+   489 00000408 0000                        dw 0x00
+   490                                  
+   491                                    ;PUERTA de interrupcion 0x21 = 33 (int 0x21, irq1, teclado)
+   492 0000040A [C609]                      dw irq1Handler ; primeros 2 bytes de offset donde estara el handler a partir de la base del segmento de codigo
+   493 0000040C 2000                        dw codeSel_Lvl0; selector de descriptor de segmento de codigo para ir a la GDT
+   494 0000040E 00                          db 0           ; bits del 32 al 39 en 0
+   495 0000040F 86                          db 0x86        ; byte de atributos: P=1 DPL=00 (puede interrumpir cualquier tarea) S=0 (es de sistema) TIPO=0110 (Puerta de int. de 16 bits) 
+   496 00000410 0000                        dw 0x00        ; ultimos 2 bytes de offset en 0
+   497                                  
+   498                                  idtSize equ $-idt
+   499                                  ;***********************************
+   500                                  ;	Codigo
+   501                                  ;***********************************
+   502                                  ;comienzo del codigo
+   503                                  inicio: 
+   504                                    ;deshabilito interruciones
+   505 00000412 FA                        cli
+   506                                  
+   507                                  ;-------- Remapeo de las interrupciones de los PICs -----------------------------------------------------------
+   508                                    ;Inicializacion PIC 1
+   509 00000413 B011                      mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
+   510 00000415 E620                      out 0x20, al
+   511 00000417 B020                      mov al, 0x20 ; icw2: INT base para el PIC N#1 tipo 20H (osea ahora IRQ0 sera el tipo de interrupcion 20h)
+   512 00000419 E621                      out 0x21, al ; el PIC1 comienza en 0x20
+   513 0000041B B004                      mov al, 0x04 ; icw3: PIC N#1 Master tiene un slave conectado a IRQ2 (0000 0100b)
+   514 0000041D E621                      out 0x21, al
+   515 0000041F B001                      mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
+   516 00000421 E621                      out 0x21, al
+   517                                  
+   518                                    ;Inicializacion PIC 2
+   519 00000423 B011                      mov al, 0x11 ; icw1: IRQs activas por flanco, modo cascada
+   520 00000425 E6A0                      out 0xa0, al
+   521 00000427 B028                      mov al, 0x28 ; icw2: INT base para el PIC N#1 tipo 28h
+   522 00000429 E6A1                      out 0xa1, al ; el PIC2 comienza en 0x28
+   523 0000042B B002                      mov al, 0x02 ; icw3: PIC N#2 Slave, IRQ2 es la linea que envia al Master (010b)
+   524 0000042D E6A1                      out 0xa1, al
+   525 0000042F B001                      mov al, 0x01 ; icw4: Modo No Buffered, Fin de interrupcion normal, procesador 8086
+   526 00000431 E6A1                      out 0xa1, al
+   527                                  
+   528                                  ;-------- Reconfiguro Timer para que interrumpa cada 1ms ------------
+   529                                    ; Para reprogramar el timer tick para que interrumpa cada 1 ms
+   530                                    ; debo dividir los 1,193180Mhz por la cuenta a cargar en el 8253/4
+   531                                    ; Por ejemplo: 1mseg1.19e6 / 04a6h (1190) = 1000 ints/s 
+   532 00000433 B8A604                    mov ax,04a6h
+   533 00000436 E640                      out 40h,al ; Parte Baja
+   534 00000438 88E0                      mov al,ah
+   535 0000043A E640                      out 40h,al ; Parte Alta
+   536                                  
+   537                                  ;-------- Habilito binario en el RTC (bit 2 del registro B) --------
+   538                                    ; Paso 1: Selecciono el registro B
+   539 0000043C B00B                      mov al, 0x0B
+   540 0000043E E670                      out 70h, al
+   541 00000440 E471                      in al, 71h          ; Leo el valor actual del registro B
+   542 00000442 88C3                      mov bl, al          ; Lo guardo en BL
+   543                                    ; Paso 2: Seteo el bit 2 (DM = 1) para binario
+   544 00000444 80CB04                    or bl, 00000100b    ; BL = BL | 0x04
+   545                                    ; Paso 3: Vuelvo a escribir el registro B con el bit 2 activado
+   546 00000447 B00B                      mov al, 0x0B
+   547 00000449 E670                      out 70h, al
+   548 0000044B 88D8                      mov al, bl
+   549 0000044D E671                      out 71h, al
+   550                                  
+   551                                  ;-------------------------------------------------------------------
+   552                                  
+   553                                    ;cargo gdtr
+   554 0000044F B87700                    mov ax, gdtSize - 1	;cargo limite a la gdtr: longitud de gdt - 1
+   555 00000452 A3[0300]                  mov [gdtr + 0], ax	;a partir de la primer posicion de los 6 bytes de gdtr, osea ocupo 2 bytes, que es el tamaño del limite, por eso uso ax
+   556                                  
+   557 00000455 6631C0                    xor eax, eax
+   558 00000458 B8[8A02]                  mov ax, gdt         ; cargo base de la gdt en ax
+   559 0000045B 66A3[0500]                mov [gdtr + 2], eax	; a partir del 3 byte, que es donde esta el campo base de la GDTR, son 4 bytes, por eso uso eax
+   560                                  
+   561                                    ;cargo idtr
+   562 0000045F B80F01                    mov ax, idtSize - 1	;longitud de idt - 1
+   563 00000462 A3[0900]                  mov [idtr + 0], ax		
+   564                                  
+   565 00000465 6631C0                    xor eax, eax
+   566 00000468 66B8[02030000]            mov eax, idt
+   567 0000046E 66A3[0B00]                mov [idtr + 2], eax	;ubicacion de la idt en memoria	
+   568                                  
+   569                                    ;cargo en el registro gdtr
+   570 00000472 0F0116[0300]              lgdt [gdtr]
+   571                                  
+   572                                    ;cargo en el registro idtr      load idt
+   573 00000477 0F011E[0900]              lidt [idtr]
+   574                                  
+   575                                    ;paso a modo protegido
+   576 0000047C 0F20C0                    mov eax, cr0
+   577 0000047F 0C01                      or al,1
+   578 00000481 0F22C0                    mov cr0, eax
+   579 00000484 EB00                      jmp short $+2
+   580                                  
+   581                                    ;cargo ss, ds, y es con el selector del descriptor de datos de nivel 0 (es lo usare para escribir en pantalla)
+   582 00000486 B80800                    mov ax, dataSel_Lvl0
+   583 00000489 8ED0                      mov ss, ax
+   584 0000048B 8ED8                      mov ds, ax
+   585 0000048D B81800                    mov ax, videoSel_Lvl0
+   586 00000490 8EC0                      mov es, ax
+   587                                  
+   588                                    ;cargo en cs el selector de codigo codeSel0_Niv0
+   589 00000492 EA[9704]2000              jmp codeSel_Lvl0:modo_protegido
+   590                                  
+   591                                  modo_protegido:
+   592                                    ;apunto esp al final del codigo + 0x100
+   593 00000497 66B8[090B0000]            mov eax, stackTaskInit_Lvl0            ; Pila de la tarea inicial
+   594 0000049D 6689C4                    mov esp, eax
+   595                                  
+   596                                    ;enmascaro todas las interrupciones menos la irq1 (Teclado)int 21h y irq0 (timer tick) disable int 20h (Luego del remapeado quedo asi)                                           
+   597 000004A0 B0FC                      mov al, 0xfc   ; Mascara PIC Master   0xfc   1111 1100 --> osea la IRQ1 es el 2do bit, la IRQ0 el primer bit, poniendo en 0 la habilito
+   598 000004A2 E621                      out 0x21, al   ; 0x21 es la direccion del registro de enmascaramiento del PIC Master
+   599 000004A4 B0FF                      mov al, 0xff   ; Mascara PIC Slave, ponemos todo en 1, osea deshabilito todas sus interrupciones pues no las uso
+   600 000004A6 E6A1                      out 0xa1, al   ; 0xA1 es la direccion del registro de enmascaramiento del PIC Slave
+   601                                  
+   602                                    ;cargo tss inicial --> lo cargo en tr
+   603 000004A8 B85000                    mov ax, tssTaskInit_Lvl0_Sel
+   604 000004AB 0F00D8                    ltr ax
+   605                                  
+   606                                    ;Primero pinto toda la pantalla de blanco (video inverso):
+   607 000004AE B9D007                    mov cx, 80*25     ;cargo cantidad de puntos en pantalla a pintar
+   608 000004B1 66BF00000000              mov edi, 0x00     ;cargo edi en 0 porque ahora tambien borrare los caracteres, por lo tanto me movere por todos los bytes de la pantalla
+   609                                    bucle_pantalla: ; pinta toda la pantalla de blanco
+   610 000004B7 B000                      mov al, 0x00     ;poniendo el byte de caracter todo en 0 borra el caracter
+   611 000004B9 26678807                  mov [es:edi], al ;borro caracter 
+   612 000004BD 6647                      inc edi          ;incremento edi para pasar al atributo
+   613 000004BF B060                      mov al, COLOR_BG     ;cargo valor del atributo para poner cada caracter en blanco y fondo en blanco --> 0 111 | 0 111
+   614 000004C1 26678807                  mov [es:edi], al 
+   615 000004C5 6647                      inc edi          ;incremento edi para pasar al otro caracter
+   616                                    ;ciclo hasta terminar de recorrer el buffer de video
+   617 000004C7 E2EE                      loop bucle_pantalla ; loop usa al registro cx: decrementa cx. Si cx vale mas que 0, salta a la etiqueta indicada
+   618                                  
+   619                                  ;-------------------------------Codigo de la aplicacion -------------------------------------------------------------
+   620                                  
+   621 000004C9 FB                          sti ;habilito interrupciones
+   622                                  
+   623 000004CA EBFE                        jmp $
+   624                                  ;----------------------------------------------------------------------------------------------------------------------
+   625                                  ;                                           Handlers y codigos de las Call Gates
+   626                                  ;----------------------------------------------------------------------------------------------------------------------
+   627                                  
+   628                                  irq0Handler: ; Este es el handler del Scheduler, se conmuta a el con cada interrupcion del timertick mediante una puerta de tarea 
+   629                                    ;deshabilito interrupciones
+   630 000004CC FA                        cli
+   631                                    ;bajo flag de interrupcion
+   632 000004CD B020                      mov al, 0x20
+   633 000004CF E620                      out 0x20, al
+   634                                  
+   635                                    ;Me fijo si alguna de las tareas llego a su tiempo maximo (180s) y cuelgo el programa con HLT
+   636 000004D1 3EA0[1A00]                mov al,[ds:timeMaxTask1]
+   637 000004D5 3CB4                      cmp al,MAX_TIME_EXEC_TASK ; 180s son 3 minutos, el maximo que pide la consigna
+   638 000004D7 7501                      jne continueProgram
+   639 000004D9 F4                        hlt 
+   640                                    continueProgram:
+   641 000004DA 3EA0[1C00]                mov al,[ds:timeMaxTask2]
+   642 000004DE 3CB4                      cmp al,MAX_TIME_EXEC_TASK ; 180s son 3 minutos, el maximo que pide la consigna
+   643                                  
+   644                                    ;Aumento contador de tiempo para tarea de puerto serie
+   645 000004E0 6631C0                    xor eax,eax
+   646 000004E3 3EA1[1200]                mov ax,[ds:timeSerialPort]
+   647 000004E7 40                        inc ax
+   648 000004E8 3EA3[1200]                mov [ds:timeSerialPort],ax
+   649 000004EC 3DE803                    cmp ax,TIME_EXEC_SERIAL_PORT ;Si paso 1s = 1000ms --> Conmuto a serialPortHandler
+   650 000004EF 7514                      jne continue
+   651 000004F1 3EC706[1200]0000          mov WORD[ds:timeSerialPort], 0 ; Reseteo timeSerialPort
+   652                                    ;bajo busy flag de la tarea de nivel 0 (a llamar)
+   653 000004F8 B089                      mov al, 0x89  ;   1000 1001
+   654 000004FA A2[EF02]                  mov [gdt + tssTaskSerialPort_Lvl0_Sel + 5], al
+   655 000004FD FB                        sti
+   656 000004FE EA00006000                jmp tssTaskSerialPort_Lvl0_Sel:0
+   657 00000503 EBC7                      jmp irq0Handler
+   658                                  
+   659                                    continue:
+   660                                    ;si ticksMaxTask1 = 0 --> solo ejecuto T2
+   661 00000505 3EA0[1400]                mov al,[ds:ticksMaxTask1]
+   662 00000509 3C00                      cmp al,0
+   663 0000050B 742E                      je execOnlyTask2
+   664                                    ;si ticksMaxTask2 = 0 --> solo ejecuto T1
+   665 0000050D 3EA0[1500]                mov al,[ds:ticksMaxTask2]
+   666 00000511 3C00                      cmp al,0
+   667 00000513 7458                      je execOnlyTask1
+   668                                    ;si counterTicksTask1 no llego al maximo, aumento su tiempo y aumento counterTicksTask1 y conmuto a tarea1
+   669 00000515 3EA0[1000]                mov al,[ds:counterTicksTask1]
+   670 00000519 3E3A06[1400]              cmp al,BYTE[ds:ticksMaxTask1]
+   671 0000051E 757F                      jne execTask1 
+   672                                    ;Si son iguales sigue por aca
+   673                                    ;Si counterTicksTask2 no llego al maximo, aumento su tiempo y aumento counterTicksTask1 y conmuto a tarea2
+   674 00000520 3EA0[1100]                mov al,[ds:counterTicksTask2]
+   675 00000524 3E3A06[1500]              cmp al,BYTE[ds:ticksMaxTask2]
+   676 00000529 0F85AE00                  jne execTask2
+   677                                    ;Si son iguales sigue por aca, reseteo counterTicksTask1 y counterTicksTask2
+   678 0000052D 3EC606[1000]00            mov BYTE[ds:counterTicksTask1], 0 ;reseteo counterTicksTask1
+   679 00000533 3EC606[1100]00            mov BYTE[ds:counterTicksTask2], 0 ;reseteo counterTicksTask2
+   680                                    ;Vuelvo al inicio
+   681 00000539 EB91                      jmp irq0Handler
+   682                                  
+   683                                  execOnlyTask2:
+   684                                    ;aumento contador de tiempo de milesimas acumulado de tarea2
+   685 0000053B 6631C0                    xor eax,eax
+   686 0000053E 3EA1[1800]                mov ax, [ds:timeMilsTask2] 
+   687 00000542 40                        inc ax ;
+   688 00000543 3EA3[1800]                mov [ds:timeMilsTask2], ax
+   689 00000547 3DE803                    cmp ax, 1000
+   690                                    ;si el contador de centesimas llega a 1000 lo reseteo y aumento el contador de tiempo de tarea 2
+   691 0000054A 7513                      jne noLlegoA100_a
+   692 0000054C 3EC706[1800]0000          mov WORD[ds:timeMilsTask2], 0 ; Reseteo timeMilsTask2
+   693 00000553 6631C0                    xor eax,eax
+   694 00000556 3EA1[1C00]                mov ax, [ds:timeMaxTask2] 
+   695 0000055A 40                        inc ax ;
+   696 0000055B 3EA3[1C00]                mov [ds:timeMaxTask2],ax
+   697                                  noLlegoA100_a: ;Conmuto a Tarea 2
+   698 0000055F B089                      mov al, 0x89  ;   1000 1001
+   699 00000561 A2[FF02]                  mov [gdt + tssTask2_Lvl3_Sel + 5], al ; Reseteo Bit Busy Tarea 1
+   700 00000564 FB                        sti ;habilito las interrupciones
+   701 00000565 EA00007000                jmp tssTask2_Lvl3_Sel:0
+   702 0000056A E95FFF                    jmp irq0Handler
+   703                                  
+   704                                  execOnlyTask1:
+   705                                    ;aumento contador de tiempo de milesimas acumulado de tarea1
+   706 0000056D 6631C0                    xor eax,eax
+   707 00000570 3EA1[1600]                mov ax, [ds:timeMilsTask1] 
+   708 00000574 40                        inc ax ;
+   709 00000575 3EA3[1600]                mov [ds:timeMilsTask1], ax
+   710 00000579 3DE803                    cmp ax, 1000
+   711                                    ;si el contador de centesimas llega a 1000 lo reseteo y aumento el contador de tiempo de tarea 1
+   712 0000057C 7513                      jne noLlegoA100_b
+   713 0000057E 3EC706[1600]0000          mov WORD[ds:timeMilsTask1], 0 ; Reseteo timeMilsTask1
+   714 00000585 6631C0                    xor eax,eax
+   715 00000588 3EA1[1A00]                mov ax, [ds:timeMaxTask1] 
+   716 0000058C 40                        inc ax ;
+   717 0000058D 3EA3[1A00]                mov [ds:timeMaxTask1],ax
+   718                                    noLlegoA100_b: ;Conmuto a Tarea 1
+   719 00000591 B089                      mov al, 0x89  ;   1000 1001
+   720 00000593 A2[F702]                  mov [gdt + tssTask1_Lvl3_Sel + 5], al ; Reseteo Bit Busy Tarea 1
+   721 00000596 FB                        sti ;habilito las interrupciones
+   722 00000597 EA00006800                jmp tssTask1_Lvl3_Sel:0
+   723 0000059C E92DFF                    jmp irq0Handler
+   724                                  
+   725                                  execTask1:
+   726                                    ;aumento contador de tiempo de milesimas acumulado de tarea1
+   727 0000059F 6631C0                    xor eax,eax
+   728 000005A2 3EA1[1600]                mov ax, [ds:timeMilsTask1] 
+   729 000005A6 40                        inc ax ;
+   730 000005A7 3EA3[1600]                mov [ds:timeMilsTask1], ax
+   731 000005AB 3DE803                    cmp ax, 1000
+   732                                    ;si el contador de centesimas llega a 1000 lo reseteo y aumento el contador de tiempo de tarea 1
+   733 000005AE 7513                      jne noLlegoA100_c
+   734 000005B0 3EC706[1600]0000          mov WORD[ds:timeMilsTask1], 0 ; Reseteo timeMilsTask1
+   735 000005B7 6631C0                    xor eax,eax
+   736 000005BA 3EA1[1A00]                mov ax, [ds:timeMaxTask1] 
+   737 000005BE 40                        inc ax ;
+   738 000005BF 3EA3[1A00]                mov [ds:timeMaxTask1],ax
+   739                                  noLlegoA100_c: ;Aumento counterTicksTask1 y conmuto a Tarea 1
+   740 000005C3 3EA0[1000]                mov al, [ds:counterTicksTask1] 
+   741 000005C7 FEC0                      inc al ;
+   742 000005C9 3EA2[1000]                mov [ds:counterTicksTask1], al
+   743 000005CD B089                      mov al, 0x89  ;   1000 1001
+   744 000005CF A2[F702]                  mov [gdt + tssTask1_Lvl3_Sel + 5], al ; Reseteo Bit Busy Tarea 1
+   745 000005D2 FB                        sti ;habilito las interrupciones
+   746 000005D3 EA00006800                jmp tssTask1_Lvl3_Sel:0
+   747 000005D8 E9F1FE                    jmp irq0Handler
+   748                                  
+   749                                  execTask2:
+   750                                    ;aumento contador de tiempo de milesimas acumulado de tarea2
+   751 000005DB 6631C0                    xor eax,eax
+   752 000005DE 3EA1[1800]                mov ax, [ds:timeMilsTask2] 
+   753 000005E2 40                        inc ax ;
+   754 000005E3 3EA3[1800]                mov [ds:timeMilsTask2], ax
+   755 000005E7 3DE803                    cmp ax, 1000
+   756                                    ;si el contador de centesimas llega a 100 lo reseteo y aumento el contador de tiempo de tarea 1
+   757 000005EA 7513                      jne noLlegoA100_d
+   758 000005EC 3EC706[1800]0000          mov WORD[ds:timeMilsTask2], 0 ; Reseteo tiempoCentesimasTarea1
+   759 000005F3 6631C0                    xor eax,eax
+   760 000005F6 3EA1[1C00]                mov ax, [ds:timeMaxTask2] 
+   761 000005FA 40                        inc ax ;
+   762 000005FB 3EA3[1C00]                mov [ds:timeMaxTask2],ax
+   763                                  noLlegoA100_d: ;Aumento counterTicksTask1 y conmuto a Tarea 1
+   764 000005FF 3EA0[1100]                mov al, [ds:counterTicksTask2] 
+   765 00000603 FEC0                      inc al ;
+   766 00000605 3EA2[1100]                mov [ds:counterTicksTask2], al
+   767 00000609 B089                      mov al, 0x89  ;   1000 1001
+   768 0000060B A2[FF02]                  mov [gdt + tssTask2_Lvl3_Sel + 5], al ; Reseteo Bit Busy Tarea 1
+   769 0000060E FB                        sti ;habilito las interrupciones
+   770 0000060F EA00007000                jmp tssTask2_Lvl3_Sel:0
+   771 00000614 E9B5FE                    jmp irq0Handler
+   772                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+   773                                  
+   774                                  serialPortHandler:
+   775                                    wait1:
+   776 00000617 BAFD03                      mov dx, 0x3FD  
+   777 0000061A EC                          in al, dx           ; Leo Line Status Register, para ver si el buffer del puerto serie esta libre
+   778 0000061B A820                        test al, 0x20       ; ¿Está vacío el THR? (bit 5)
+   779 0000061D 74F8                        jz wait1            ; Si no está vacío, esperar
+   780 0000061F 3EA0[7500]                  mov al, [ds:tenHour]
+   781 00000623 0430                        add al, 0x30        ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   782 00000625 BAF803                      mov dx, 0x3f8
+   783 00000628 EE                          out dx, al
+   784                                    wait2:
+   785 00000629 BAFD03                      mov dx, 0x3FD  
+   786 0000062C EC                          in al, dx           ; Leo Line Status Register, para ver si el buffer del puerto serie esta libre
+   787 0000062D A820                        test al, 0x20       ; ¿Está vacío el THR? (bit 5)
+   788 0000062F 74F8                        jz wait2            ; Si no está vacío, esperar
+   789 00000631 3EA0[7400]                  mov al, [ds:unitHour]
+   790 00000635 0430                        add al, 0x30        ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   791 00000637 BAF803                      mov dx, 0x3f8
+   792 0000063A EE                          out dx, al
+   793 0000063B EBDA                        jmp serialPortHandler
+   794                                  
+   795                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+   796                                  
+   797                                  Task1_Lvl3:  
+   798                                    ;llamo a la callgate de la tarea 1
+   799 0000063D 9A00003300                call cgPrintScreenUp:0  ; con esto ejecuto codigo de nivel 0 --> cgPrintPantalla es el selector de la callgate, que es el descriptor que accede
+   800                                                                    ; a la memoria donde esta el codigo printPantalla, que esto se hace en anillo 0 ya que pinta la pantalla y su memoria
+   801                                                                    ; la pusimos en anillo 0
+   802 00000642 EBF9                      jmp Task1_Lvl3
+   803                                  
+   804                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+   805                                  
+   806                                  Task2_Lvl3:  
+   807                                    ;llamo a la callgate de la tarea 2
+   808 00000644 9A00003B00                call cgPrintScreenDown:0  ; con esto ejecuto codigo de nivel 0 --> cgPrintPantalla es el selector de la callgate, que es el descriptor que accede
+   809                                                                    ; a la memoria donde esta el codigo printPantalla, que esto se hace en anillo 0 ya que pinta la pantalla y su memoria
+   810                                                                    ; la pusimos en anillo 0
+   811 00000649 EBF9                      jmp Task2_Lvl3
+   812                                  
+   813                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+   814                                  
+   815                                  printScreenUp:
+   816                                    ;Cuando entro a código de nivel 0 mediante la call gate, lo primero que tengo que hacer es cargar los selectores de nivel 0 en DS, ES, 
+   817                                    ;pues yo venia de nivel 3
+   818 0000064B B80800                    mov ax, dataSel_Lvl0
+   819 0000064E 8ED8                      mov ds, ax
+   820 00000650 B81800                    mov ax, videoSel_Lvl0
+   821 00000653 8EC0                      mov es, ax
+   822                                  
+   823                                    ;Leo segundos del RTC
+   824 00000655 B000                      mov al,0x00 ; 0x00 es el registro del MC146818 que tiene los segundos
+   825 00000657 E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h los segundos
+   826 00000659 E471                      in al,71h   ; Leo lo que hay en el 71h, osea los segundos, y lo guardo en al, luego los guardo en secondsRTC
+   827 0000065B 3EA2[6D00]                mov [ds:secondsRTC],al
+   828                                  
+   829                                    ;Leo minutos del RTC
+   830 0000065F B002                      mov al,0x02 ; 0x02 es el registro del MC146818 que tiene los minutos
+   831 00000661 E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h los minutos
+   832 00000663 E471                      in al,71h   ; Leo lo que hay en el 71h, osea los minutos, y lo guardo en al, luego los guardo en minutesRTC
+   833 00000665 3EA2[7000]                mov [ds:minutesRTC],al
+   834                                  
+   835                                    ;Leo hora del RTC
+   836 00000669 B004                      mov al,0x04 ; 0x04 es el registro del MC146818 que tiene la hora
+   837 0000066B E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h la hora
+   838 0000066D E471                      in al,71h   ; Leo lo que hay en el 71h, osea la hora, y lo guardo en al, luego los guardo en hourRTC
+   839 0000066F 3EA2[7300]                mov [ds:hourRTC],al
+   840                                  
+   841                                    ;Logica para separar en decenas y unidades los segundos
+   842 00000673 31C0                      xor ax,ax
+   843 00000675 3EA0[6D00]                mov al,[ds:secondsRTC]    
+   844 00000679 31D2                      xor dx, dx
+   845 0000067B BB0A00                    mov bx, 10
+   846 0000067E F7F3                      div bx        ; DX:AX / 10
+   847                                                  ; Ax = cociente (decena), DX = resto (unidad)
+   848 00000680 3EA2[6F00]                mov [ds:tenSeconds], al
+   849 00000684 3E8816[6E00]              mov [ds:unitSeconds], dl
+   850                                  
+   851                                    ;Logica para separar en decenas y unidades los minutos
+   852 00000689 31C0                      xor ax,ax
+   853 0000068B 3EA0[7000]                mov al,[ds:minutesRTC]    
+   854 0000068F 31D2                      xor dx, dx
+   855 00000691 BB0A00                    mov bx, 10
+   856 00000694 F7F3                      div bx        ; DX:AX / 10
+   857                                                  ; Ax = cociente (decena), DX = resto (unidad)
+   858 00000696 3EA2[7200]                mov [ds:tenMinutes], al
+   859 0000069A 3E8816[7100]              mov [ds:unitMinutes], dl
+   860                                  
+   861                                    ;Logica para separar en decenas y unidades la hora
+   862 0000069F 31C0                      xor ax,ax
+   863 000006A1 3EA0[7300]                mov al,[ds:hourRTC]    
+   864 000006A5 31D2                      xor dx, dx
+   865 000006A7 BB0A00                    mov bx, 10
+   866 000006AA F7F3                      div bx        ; DX:AX / 10
+   867                                                  ; Ax = cociente (decena), DX = resto (unidad)
+   868 000006AC 3EA2[7500]                mov [ds:tenHour], al
+   869 000006B0 3E8816[7400]              mov [ds:unitHour], dl
+   870                                  
+   871                                    ;Logica para imprimir hh:mm:ss
+   872 000006B5 6631C0                    xor eax,eax
+   873 000006B8 6631FF                    xor edi,edi            ;reseteo edi para que vaya superponiendo el contador a imprimir
+   874 000006BB 6681C7A6040000            add edi,70*17          ;llevo el puntero a la posicion pedida --> Fila 8, Columna 35
+   875                                    ;Imprimo decena hora
+   876 000006C2 3EA0[7500]                mov al, [ds:tenHour]
+   877 000006C6 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   878 000006C8 26678807                  mov [es:edi], al       ;imprimo decena 
+   879 000006CC 6647                      inc edi                ;paso al byte de atributos 
+   880 000006CE B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   881 000006D0 26678807                  mov [es:edi], al
+   882 000006D4 6647                      inc edi                ;paso a caracter de unidad hora
+   883                                    ;Imprimo unidad hora
+   884 000006D6 3EA0[7400]                mov al, [ds:unitHour]
+   885 000006DA 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   886 000006DC 26678807                  mov [es:edi], al       ;imprimo unidad
+   887 000006E0 6647                      inc edi                ;paso al byte de atributos 
+   888 000006E2 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   889 000006E4 26678807                  mov [es:edi], al
+   890 000006E8 6647                      inc edi                ;paso a caracter de :
+   891                                  
+   892                                   ;Imprimo :
+   893 000006EA B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+   894 000006EC 26678807                  mov [es:edi], al       ;imprimo decena 
+   895 000006F0 6647                      inc edi                ;paso al byte de atributos 
+   896 000006F2 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   897 000006F4 26678807                  mov [es:edi], al
+   898 000006F8 6647                      inc edi                ;paso a caracter de decena minutos
+   899                                  
+   900                                    ;Imprimo decena minutos
+   901 000006FA 3EA0[7200]                mov al, [ds:tenMinutes]
+   902 000006FE 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   903 00000700 26678807                  mov [es:edi], al       ;imprimo decena 
+   904 00000704 6647                      inc edi                ;paso al byte de atributos 
+   905 00000706 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   906 00000708 26678807                  mov [es:edi], al
+   907 0000070C 6647                      inc edi                ;paso a caracter de unidad minutos
+   908                                    ;Imprimo unidad minutos
+   909 0000070E 3EA0[7100]                mov al, [ds:unitMinutes]
+   910 00000712 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   911 00000714 26678807                  mov [es:edi], al       ;imprimo unidad
+   912 00000718 6647                      inc edi                ;paso al byte de atributos 
+   913 0000071A B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   914 0000071C 26678807                  mov [es:edi], al
+   915 00000720 6647                      inc edi                ;paso a caracter de :
+   916                                  
+   917                                   ;Imprimo :
+   918 00000722 B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+   919 00000724 26678807                  mov [es:edi], al       ;imprimo decena 
+   920 00000728 6647                      inc edi                ;paso al byte de atributos 
+   921 0000072A B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   922 0000072C 26678807                  mov [es:edi], al
+   923 00000730 6647                      inc edi                ;paso a caracter de decena segundos
+   924                                  
+   925                                    ;Imprimo decena segundos
+   926 00000732 3EA0[6F00]                mov al, [ds:tenSeconds]
+   927 00000736 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   928 00000738 26678807                  mov [es:edi], al       ;imprimo decena 
+   929 0000073C 6647                      inc edi                ;paso al byte de atributos 
+   930 0000073E B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   931 00000740 26678807                  mov [es:edi], al
+   932 00000744 6647                      inc edi                ;paso a caracter de unidad segundos
+   933                                    ;Imprimo unidad segundos
+   934 00000746 3EA0[6E00]                mov al, [ds:unitSeconds]
+   935 0000074A 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   936 0000074C 26678807                  mov [es:edi], al       ;imprimo unidad
+   937 00000750 6647                      inc edi                ;paso al byte de atributos 
+   938 00000752 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   939 00000754 26678807                  mov [es:edi], al
+   940                                   
+   941 00000758 6647                      inc edi
+   942 0000075A 6647                      inc edi 
+   943 0000075C 6647                      inc edi
+   944                                  
+   945                                    ;Imprimo ticksMax por tarea1, para ver que prioridad tiene
+   946 0000075E 3EA0[1400]                mov al, [ds:ticksMaxTask1]
+   947 00000762 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+   948 00000764 26678807                  mov [es:edi], al       ;imprimo 
+   949 00000768 6647                      inc edi                ;paso al byte de atributos 
+   950 0000076A B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+   951 0000076C 26678807                  mov [es:edi], al
+   952                                  
+   953 00000770 CB                        retf
+   954                                  
+   955                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+   956                                  
+   957                                  printScreenDown:
+   958                                    ;Cuando entro a código de nivel 0 mediante la call gate, lo primero que tengo que hacer es cargar los selectores de nivel 0 en DS, ES, 
+   959                                    ;pues yo venia de nivel 3 
+   960 00000771 B80800                    mov ax, dataSel_Lvl0
+   961 00000774 8ED8                      mov ds, ax
+   962 00000776 B81800                    mov ax, videoSel_Lvl0
+   963 00000779 8EC0                      mov es, ax
+   964                                  
+   965                                    ;Leo segundos del RTC
+   966 0000077B B000                      mov al,0x00 ; 0x00 es el registro del MC146818 que tiene los segundos
+   967 0000077D E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h los segundos
+   968 0000077F E471                      in al,71h   ; Leo lo que hay en el 71h, osea los segundos, y lo guardo en al, luego los guardo en segundosRTC
+   969 00000781 3EA2[6D00]                mov [ds:secondsRTC],al
+   970                                  
+   971                                    ;Leo minutos del RTC
+   972 00000785 B002                      mov al,0x02 ; 0x02 es el registro del MC146818 que tiene los minutos
+   973 00000787 E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h los minutos
+   974 00000789 E471                      in al,71h   ; Leo lo que hay en el 71h, osea los minutos, y lo guardo en al, luego los guardo en minutesRTC
+   975 0000078B 3EA2[7000]                mov [ds:minutesRTC],al
+   976                                  
+   977                                    ;Leo hora del RTC
+   978 0000078F B004                      mov al,0x04 ; 0x04 es el registro del MC146818 que tiene la hora
+   979 00000791 E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h la hora
+   980 00000793 E471                      in al,71h   ; Leo lo que hay en el 71h, osea la hora, y lo guardo en al, luego los guardo en hourRTC
+   981 00000795 3EA2[7300]                mov [ds:hourRTC],al
+   982                                  
+   983                                    ;Leo año del RTC --> el año esta en 2 digitos
+   984 00000799 B009                      mov al,0x09 ; 0x09 es el registro del MC146818 que tiene el año
+   985 0000079B E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h los el año
+   986 0000079D E471                      in al,71h   ; Leo lo que hay en el 71h, osea el año, y lo guardo en al, luego los guardo en añoRTC
+   987 0000079F 3EA2[7C00]                mov [ds:yearRTC],al
+   988                                  
+   989                                    ;Leo mes del RTC
+   990 000007A3 B008                      mov al,0x08 ; 0x08 es el registro del MC146818 que tiene el mes
+   991 000007A5 E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h el mes
+   992 000007A7 E471                      in al,71h   ; Leo lo que hay en el 71h, osea el mes, y lo guardo en al, luego los guardo en monthRTC
+   993 000007A9 3EA2[7900]                mov [ds:monthRTC],al
+   994                                  
+   995                                    ;Leo dia del RTC
+   996 000007AD B007                      mov al,0x07 ; 0x07 es el registro del MC146818 que tiene el dia
+   997 000007AF E670                      out 70h,al  ; Con esto va al puerto de E/S 70h y carga en el 71h el dia
+   998 000007B1 E471                      in al,71h   ; Leo lo que hay en el 71h, osea el dia, y lo guardo en al, luego los guardo en dayRTC
+   999 000007B3 3EA2[7600]                mov [ds:dayRTC],al
+  1000                                  
+  1001                                    ;Logica para separar en decenas y unidades los segundos
+  1002 000007B7 31C0                      xor ax,ax
+  1003 000007B9 3EA0[6D00]                mov al,[ds:secondsRTC]    
+  1004 000007BD 31D2                      xor dx, dx
+  1005 000007BF BB0A00                    mov bx, 10
+  1006 000007C2 F7F3                      div bx        ; DX:AX / 10
+  1007                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1008 000007C4 3EA2[6F00]                mov [ds:tenSeconds], al
+  1009 000007C8 3E8816[6E00]              mov [ds:unitSeconds], dl
+  1010                                  
+  1011                                    ;Logica para separar en decenas y unidades los minutos
+  1012 000007CD 31C0                      xor ax,ax
+  1013 000007CF 3EA0[7000]                mov al,[ds:minutesRTC]    
+  1014 000007D3 31D2                      xor dx, dx
+  1015 000007D5 BB0A00                    mov bx, 10
+  1016 000007D8 F7F3                      div bx        ; DX:AX / 10
+  1017                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1018 000007DA 3EA2[7200]                mov [ds:tenMinutes], al
+  1019 000007DE 3E8816[7100]              mov [ds:unitMinutes], dl
+  1020                                  
+  1021                                    ;Logica para separar en decenas y unidades la hora
+  1022 000007E3 31C0                      xor ax,ax
+  1023 000007E5 3EA0[7300]                mov al,[ds:hourRTC]    
+  1024 000007E9 31D2                      xor dx, dx
+  1025 000007EB BB0A00                    mov bx, 10
+  1026 000007EE F7F3                      div bx        ; DX:AX / 10
+  1027                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1028 000007F0 3EA2[7500]                mov [ds:tenHour], al
+  1029 000007F4 3E8816[7400]              mov [ds:unitHour], dl
+  1030                                  
+  1031                                    ;Logica para separar en decenas y unidades el dia
+  1032 000007F9 31C0                      xor ax,ax
+  1033 000007FB 3EA0[7600]                mov al,[ds:dayRTC]    
+  1034 000007FF 31D2                      xor dx, dx
+  1035 00000801 BB0A00                    mov bx, 10
+  1036 00000804 F7F3                      div bx        ; DX:AX / 10
+  1037                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1038 00000806 3EA2[7800]                mov [ds:tenDays], al
+  1039 0000080A 3E8816[7700]              mov [ds:unitDay], dl
+  1040                                  
+  1041                                    ;Logica para separar en decenas y unidades el mes
+  1042 0000080F 31C0                      xor ax,ax
+  1043 00000811 3EA0[7900]                mov al,[ds:monthRTC]    
+  1044 00000815 31D2                      xor dx, dx
+  1045 00000817 BB0A00                    mov bx, 10
+  1046 0000081A F7F3                      div bx        ; DX:AX / 10
+  1047                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1048 0000081C 3EA2[7B00]                mov [ds:tenMonth], al
+  1049 00000820 3E8816[7A00]              mov [ds:unitMonth], dl
+  1050                                  
+  1051                                    ;Logica para separar en decenas y unidades el año
+  1052 00000825 31C0                      xor ax,ax
+  1053 00000827 3EA0[7C00]                mov al,[ds:yearRTC]    
+  1054 0000082B 31D2                      xor dx, dx
+  1055 0000082D BB0A00                    mov bx, 10
+  1056 00000830 F7F3                      div bx        ; DX:AX / 10
+  1057                                                  ; Ax = cociente (decena), DX = resto (unidad)
+  1058 00000832 3EA2[7F00]                mov [ds:tenYear], al
+  1059 00000836 3E8816[7E00]              mov [ds:unitYear], dl
+  1060                                  
+  1061                                    ;Logica para imprimir hh:mm:ss
+  1062                                    ;                     dd:mm:aaaa
+  1063 0000083B 6631C0                    xor eax,eax
+  1064 0000083E 6631FF                    xor edi,edi            ;reseteo edi para que vaya superponiendo el contador a imprimir
+  1065 00000841 6681C706090000            add edi,70*33          ;llevo el puntero a la posicion pedida --> Fila 16, Columna 35
+  1066                                    ;Imprimo decena hora
+  1067 00000848 3EA0[7500]                mov al, [ds:tenHour]
+  1068 0000084C 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1069 0000084E 26678807                  mov [es:edi], al       ;imprimo decena 
+  1070 00000852 6647                      inc edi                ;paso al byte de atributos 
+  1071 00000854 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1072 00000856 26678807                  mov [es:edi], al
+  1073 0000085A 6647                      inc edi                ;paso a caracter de unidad hora
+  1074                                    ;Imprimo unidad hora
+  1075 0000085C 3EA0[7400]                mov al, [ds:unitHour]
+  1076 00000860 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1077 00000862 26678807                  mov [es:edi], al       ;imprimo unidad
+  1078 00000866 6647                      inc edi                ;paso al byte de atributos 
+  1079 00000868 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1080 0000086A 26678807                  mov [es:edi], al
+  1081 0000086E 6647                      inc edi                ;paso a caracter :
+  1082                                  
+  1083                                   ;Imprimo :
+  1084 00000870 B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+  1085 00000872 26678807                  mov [es:edi], al       ;imprimo decena 
+  1086 00000876 6647                      inc edi                ;paso al byte de atributos 
+  1087 00000878 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1088 0000087A 26678807                  mov [es:edi], al
+  1089 0000087E 6647                      inc edi                ;paso a caracter de decena minutos
+  1090                                  
+  1091                                    ;Imprimo decena minutos
+  1092 00000880 3EA0[7200]                mov al, [ds:tenMinutes]
+  1093 00000884 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1094 00000886 26678807                  mov [es:edi], al       ;imprimo decena 
+  1095 0000088A 6647                      inc edi                ;paso al byte de atributos 
+  1096 0000088C B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1097 0000088E 26678807                  mov [es:edi], al
+  1098 00000892 6647                      inc edi                ;paso a caracter de unidad minutos
+  1099                                    ;Imprimo unidad minutos
+  1100 00000894 3EA0[7100]                mov al, [ds:unitMinutes]
+  1101 00000898 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1102 0000089A 26678807                  mov [es:edi], al       ;imprimo unidad
+  1103 0000089E 6647                      inc edi                ;paso al byte de atributos 
+  1104 000008A0 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1105 000008A2 26678807                  mov [es:edi], al
+  1106 000008A6 6647                      inc edi                ;paso a caracter :
+  1107                                  
+  1108                                   ;Imprimo :
+  1109 000008A8 B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+  1110 000008AA 26678807                  mov [es:edi], al       ;imprimo decena 
+  1111 000008AE 6647                      inc edi                ;paso al byte de atributos 
+  1112 000008B0 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1113 000008B2 26678807                  mov [es:edi], al
+  1114 000008B6 6647                      inc edi                ;paso a caracter de decena segundos
+  1115                                  
+  1116                                    ;Imprimo decena segundos
+  1117 000008B8 3EA0[6F00]                mov al, [ds:tenSeconds]
+  1118 000008BC 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1119 000008BE 26678807                  mov [es:edi], al       ;imprimo decena 
+  1120 000008C2 6647                      inc edi                ;paso al byte de atributos 
+  1121 000008C4 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1122 000008C6 26678807                  mov [es:edi], al
+  1123 000008CA 6647                      inc edi                ;paso a caracter de unidad segundos
+  1124                                    ;Imprimo unidad minutos
+  1125 000008CC 3EA0[6E00]                mov al, [ds:unitSeconds]
+  1126 000008D0 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1127 000008D2 26678807                  mov [es:edi], al       ;imprimo unidad
+  1128 000008D6 6647                      inc edi                ;paso al byte de atributos 
+  1129 000008D8 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1130 000008DA 26678807                  mov [es:edi], al
+  1131                                   
+  1132 000008DE 6647                      inc edi
+  1133 000008E0 6647                      inc edi 
+  1134 000008E2 6647                      inc edi
+  1135                                  
+  1136                                    ;Imprimo ticksMax por tarea2, para ver que prioridad tiene
+  1137 000008E4 3EA0[1500]                mov al, [ds:ticksMaxTask2]
+  1138 000008E8 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1139 000008EA 26678807                  mov [es:edi], al       ;imprimo 
+  1140 000008EE 6647                      inc edi                ;paso al byte de atributos 
+  1141 000008F0 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1142 000008F2 26678807                  mov [es:edi], al
+  1143                                  
+  1144                                    ;Paso a la fila 17 columna 35
+  1145 000008F6 6631C0                    xor eax,eax
+  1146 000008F9 6631FF                    xor edi,edi            ;reseteo edi para que vaya superponiendo el contador a imprimir
+  1147 000008FC 6681C792090000            add edi,70*35          ;llevo el puntero a la posicion pedida --> Fila 17, Columna 35
+  1148 00000903 6683C714                  add edi,20
+  1149                                  
+  1150                                    ;Imprimo decena dia
+  1151 00000907 3EA0[7800]                mov al, [ds:tenDays]
+  1152 0000090B 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1153 0000090D 26678807                  mov [es:edi], al       ;imprimo decena 
+  1154 00000911 6647                      inc edi                ;paso al byte de atributos 
+  1155 00000913 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1156 00000915 26678807                  mov [es:edi], al
+  1157 00000919 6647                      inc edi                ;paso a caracter de unidad dia
+  1158                                    ;Imprimo unidad dia
+  1159 0000091B 3EA0[7700]                mov al, [ds:unitDay]
+  1160 0000091F 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1161 00000921 26678807                  mov [es:edi], al       ;imprimo unidad
+  1162 00000925 6647                      inc edi                ;paso al byte de atributos 
+  1163 00000927 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1164 00000929 26678807                  mov [es:edi], al
+  1165 0000092D 6647                      inc edi                ;paso a caracter :
+  1166                                  
+  1167                                   ;Imprimo :
+  1168 0000092F B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+  1169 00000931 26678807                  mov [es:edi], al       ;imprimo decena 
+  1170 00000935 6647                      inc edi                ;paso al byte de atributos 
+  1171 00000937 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1172 00000939 26678807                  mov [es:edi], al
+  1173 0000093D 6647                      inc edi                ;paso a caracter de decena mes
+  1174                                  
+  1175                                    ;Imprimo decena mes
+  1176 0000093F 3EA0[7B00]                mov al, [ds:tenMonth]
+  1177 00000943 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1178 00000945 26678807                  mov [es:edi], al       ;imprimo decena 
+  1179 00000949 6647                      inc edi                ;paso al byte de atributos 
+  1180 0000094B B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1181 0000094D 26678807                  mov [es:edi], al
+  1182 00000951 6647                      inc edi                ;paso a caracter de unidad mes
+  1183                                    ;Imprimo unidad mes
+  1184 00000953 3EA0[7A00]                mov al, [ds:unitMonth]
+  1185 00000957 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1186 00000959 26678807                  mov [es:edi], al       ;imprimo unidad
+  1187 0000095D 6647                      inc edi                ;paso al byte de atributos 
+  1188 0000095F B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1189 00000961 26678807                  mov [es:edi], al
+  1190 00000965 6647                      inc edi                ;paso a caracter de :
+  1191                                  
+  1192                                   ;Imprimo :
+  1193 00000967 B03A                      mov al, 0x3A           ;0x3A es el ASCII de :
+  1194 00000969 26678807                  mov [es:edi], al       ;imprimo decena 
+  1195 0000096D 6647                      inc edi                ;paso al byte de atributos 
+  1196 0000096F B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1197 00000971 26678807                  mov [es:edi], al
+  1198 00000975 6647                      inc edi                ;paso a caracter de unidad de mil de años
+  1199                                  
+  1200                                    ;Imprimo unidad de mil del año
+  1201 00000977 3EA0[8100]                mov al, [ds:milsYear]
+  1202 0000097B 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1203 0000097D 26678807                  mov [es:edi], al       ;imprimo decena 
+  1204 00000981 6647                      inc edi                ;paso al byte de atributos 
+  1205 00000983 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1206 00000985 26678807                  mov [es:edi], al
+  1207 00000989 6647                      inc edi                ;paso a caracter de centena año
+  1208                                    ;Imprimo centena año
+  1209 0000098B 3EA0[8000]                mov al, [ds:hundredYear]
+  1210 0000098F 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1211 00000991 26678807                  mov [es:edi], al       ;imprimo unidad
+  1212 00000995 6647                      inc edi                ;paso al byte de atributos 
+  1213 00000997 B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1214 00000999 26678807                  mov [es:edi], al
+  1215 0000099D 6647                      inc edi                ;paso a caracter de decena año
+  1216                                    ;Imprimo decena año
+  1217 0000099F 3EA0[7F00]                mov al, [ds:tenYear]
+  1218 000009A3 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1219 000009A5 26678807                  mov [es:edi], al       ;imprimo unidad
+  1220 000009A9 6647                      inc edi                ;paso al byte de atributos 
+  1221 000009AB B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1222 000009AD 26678807                  mov [es:edi], al
+  1223 000009B1 6647                      inc edi                ;paso a caracter de unidad año
+  1224                                    ;Imprimo unidad año
+  1225 000009B3 3EA0[7E00]                mov al, [ds:unitYear]
+  1226 000009B7 0430                      add al, 0x30           ;al sumarle 0x30 = 48 a un numero en decimal, obtengo su valor en ascii
+  1227 000009B9 26678807                  mov [es:edi], al       ;imprimo unidad
+  1228 000009BD 6647                      inc edi                ;paso al byte de atributos 
+  1229 000009BF B070                      mov al, 0x70           ;para que el caracter a mostrar se vea de color negro
+  1230 000009C1 26678807                  mov [es:edi], al
+  1231                                  
+  1232 000009C5 CB                        retf  
+  1233                                  
+  1234                                  ;---------------------------------------------------------------------------------------------------------------------------------------
+  1235                                  
+  1236                                  irq1Handler: ;Entra cada vez que se pulsa una tecla
+  1237 000009C6 FA                          cli ;deshabilito interrupciones
+  1238                                      ;bajo flag de interrupcion --   EOI End of Interrupt. mandatorio.
+  1239 000009C7 B020                        mov al, 0x20   ; 0x20, comando para bajar flag de interrupcion
+  1240 000009C9 E620                        out 0x20, al   ; 0x20 aca es la direccion del puerto de E/S del PIC Master
+  1241                                      
+  1242                                      ; aca leo el teclado para ver si se presiono la j, que es la que hara algo que haga saltar una excepcion
+  1243 000009CB E460                        in al, 0x60               ; IMPORTANTE! aunque no lo use, leer el scan code porque sino se llena el buffer del teclado!!
+  1244 000009CD 3C24                        cmp al, KEY_J_MakeCode  ; Si se pulso la tecla J no salta 
+  1245 000009CF 7512                        jne no_j         ; Si no se pulso la j, al sera distinto a 0x24 por lo tanto salta a no_es_la_jota y sigue
+  1246                                  
+  1247                                      ;si se pulso la jota no salta, hago algo que genere una excepcion, como por ejemplo dividir por 0
+  1248                                      ;Cuando divido por un registro de 32 bits (EXC), el par de registros EAX:EDX (número de 64 bits) se divide por este registro (EXC). Por lo tanto, debo poner a  cero el registro EAX y colocar el dividendo en EDX
+  1249 000009D1 6631C0                      xor eax, eax ; pongo en 0 eax
+  1250 000009D4 66BA01000000                mov edx, 1   ; pongo el dividendo (cualquiera) en edx, en este caso 1
+  1251 000009DA 66B900000000                mov ecx, 0   ; pongo el divisor 0, en edx
+  1252 000009E0 66F7F1                      div ecx      ; hace eax:edx dividido exc, osea algo dividido 0, debe generar la excepcion de dividir por 0
+  1253                                  
+  1254                                      no_j:
+  1255 000009E3 6631DB                        xor ebx, ebx ; limpio registro ebx
+  1256                                        ;si keyPressState es 1 es porque ya pulse, por lo tanto cuando vuelva a entrar aca es porque solte y no aumento contador
+  1257 000009E6 3E8A1E[0F00]                  mov bl, [ds:keyPressState]
+  1258 000009EB 80FB00                        cmp bl, 0
+  1259 000009EE 756A                          jne reset_keyPressState ;si keyPressState es 0, por lo tanto sigue
+  1260                                                                ;si keyPressState es 1, es porque ya solte, por lo tanto salta y resetea estado tecla
+  1261                                                               
+  1262                                        ;pone en 1 keyPressState y analiza si se presiona W, E o Q
+  1263 000009F0 B301                          mov bl, 1
+  1264 000009F2 881E[0F00]                    mov [keyPressState], bl
+  1265 000009F6 3C11                          cmp al, KEY_W_MakeCode  ; Si se pulso la tecla W 
+  1266 000009F8 7424                          je pressW       
+  1267 000009FA 3C12                          cmp al, KEY_E_MakeCode  ; Si se pulso la tecla E
+  1268 000009FC 743E                          je pressE  
+  1269 000009FE 3C10                          cmp al, KEY_Q_MakeCode ; Si se pulso la tecla Q
+  1270 00000A00 755F                          jne fin_handler   
+  1271                                  
+  1272                                        ;Logica si pulse Q --> Pinto pantalla de blanco y hago HLT
+  1273                                        ;Primero pinto toda la pantalla de blanco (video inverso):
+  1274 00000A02 B9D007                        mov cx, 80*25     ;cargo cantidad de puntos en pantalla a pintar
+  1275 00000A05 66BF00000000                  mov edi, 0x00     ;cargo edi en 0 porque ahora tambien borrare los caracteres, por lo tanto me movere por todos los bytes de la pantalla
+  1276                                      bucle_pantalla2: ; pinta toda la pantalla de blanco
+  1277 00000A0B B000                          mov al, 0x00     ;poniendo el byte de caracter todo en 0 borra el caracter
+  1278 00000A0D 26678807                      mov [es:edi], al ;borro caracter 
+  1279 00000A11 6647                          inc edi          ;incremento edi para pasar al atributo
+  1280 00000A13 B060                          mov al, COLOR_BG     ;cargo valor del atributo para poner cada caracter en blanco y fondo en blanco --> 0 111 | 0 111
+  1281 00000A15 26678807                      mov [es:edi], al 
+  1282 00000A19 6647                          inc edi          ;incremento edi para pasar al otro caracter
+  1283                                        ;ciclo hasta terminar de recorrer el buffer de video
+  1284 00000A1B E2EE                        loop bucle_pantalla2 ; loop usa al registro cx: decrementa cx. Si cx vale mas que 0, salta a la etiqueta indicada
+  1285                                      
+  1286 00000A1D F4                          hlt 
+  1287                                  
+  1288                                      pressW: ;logica si pulse W --> aumento 10% prioridad de tarea A y disminuyo 10% prioridad de tarea B
+  1289                                        ;si ticksMaxTask2 = 0 no sigo decrementandolo
+  1290 00000A1E 3EA0[1500]                    mov al,[ds:ticksMaxTask2]
+  1291 00000A22 3C00                          cmp al,0
+  1292 00000A24 743B                          je fin_handler
+  1293                                        ;si ticksMaxTask2 todavia no es 0, aumento en 1 ticksMaxTarea1 y disminuyo en 1 ticksMaxTarea2
+  1294 00000A26 3EA0[1400]                    mov al,[ds:ticksMaxTask1]
+  1295 00000A2A FEC0                          inc al
+  1296 00000A2C 3EA2[1400]                    mov [ds:ticksMaxTask1],al
+  1297 00000A30 3EA0[1500]                    mov al,[ds:ticksMaxTask2]
+  1298 00000A34 FEC8                          dec al
+  1299 00000A36 3EA2[1500]                    mov [ds:ticksMaxTask2],al
+  1300 00000A3A EB25                          jmp fin_handler
+  1301                                  
+  1302                                      pressE: ;logica si pulse E --> aumento 10% prioridad de tarea B y disminuyo 10% prioridad de tarea A
+  1303                                        ;si ticksMaxTask1 = 0 no sigo decrementandolo
+  1304 00000A3C 3EA0[1400]                    mov al,[ds:ticksMaxTask1]
+  1305 00000A40 3C00                          cmp al,0
+  1306 00000A42 741D                          je fin_handler
+  1307                                        ;si ticksMaxTask1 todavia no es 0, aumento en 1 ticksMaxTask2 y disminuyo en 1 ticksMaxTask1
+  1308 00000A44 3EA0[1500]                    mov al,[ds:ticksMaxTask2]
+  1309 00000A48 FEC0                          inc al
+  1310 00000A4A 3EA2[1500]                    mov [ds:ticksMaxTask2],al
+  1311 00000A4E 3EA0[1400]                    mov al,[ds:ticksMaxTask1]
+  1312 00000A52 FEC8                          dec al
+  1313 00000A54 3EA2[1400]                    mov [ds:ticksMaxTask1],al    
+  1314 00000A58 EB07                          jmp fin_handler
+  1315                                  
+  1316                                      reset_keyPressState:     ;reset keyPressState
+  1317 00000A5A B300                          mov bl, 0
+  1318 00000A5C 3E881E[0F00]                  mov [ds:keyPressState], bl
+  1319                                  
+  1320                                      fin_handler:               ; Si no se pulso ninguna de las teclas indicadas salgo de la interrupcion sin hacer nada           
+  1321 00000A61 FB                            sti
+  1322 00000A62 CF                            iret                       ; fin de la interrupcion. interrupt return
+  1323                                  
+  1324                                  excHandler0:
+  1325 00000A63 6A00                      push 0
+  1326 00000A65 EB44                      jmp excHandler
+  1327                                  
+  1328                                  excHandler1:
+  1329 00000A67 6A01                      push 1
+  1330 00000A69 EB40                      jmp excHandler
+  1331                                  
+  1332                                  excHandler3:
+  1333 00000A6B 6A03                      push 3
+  1334 00000A6D EB3C                      jmp excHandler
+  1335                                  
+  1336                                  excHandler4:
+  1337 00000A6F 6A04                      push 4
+  1338 00000A71 EB38                      jmp excHandler
+  1339                                  
+  1340                                  excHandler5:
+  1341 00000A73 6A05                      push 5
+  1342 00000A75 EB34                      jmp excHandler
+  1343                                  
+  1344                                  excHandler6:
+  1345 00000A77 6A06                      push 6
+  1346 00000A79 EB30                      jmp excHandler
+  1347                                  
+  1348                                  excHandler7:
+  1349 00000A7B 6A07                      push 7
+  1350 00000A7D EB2C                      jmp excHandler
+  1351                                  
+  1352                                  excHandler8:
+  1353 00000A7F 6A08                      push 8
+  1354 00000A81 EB28                      jmp excHandler
+  1355                                  
+  1356                                  excHandler9:
+  1357 00000A83 6A09                      push 9
+  1358 00000A85 EB24                      jmp excHandler
+  1359                                  
+  1360                                  excHandler10:
+  1361 00000A87 6A0A                      push 10
+  1362 00000A89 EB20                      jmp excHandler
+  1363                                  
+  1364                                  excHandler11:
+  1365 00000A8B 6A0B                      push 11
+  1366 00000A8D EB1C                      jmp excHandler
+  1367                                  
+  1368                                  excHandler12:
+  1369 00000A8F 6A0C                      push 12
+  1370 00000A91 EB18                      jmp excHandler
+  1371                                  
+  1372                                  excHandler13:
+  1373 00000A93 6A0D                      push 13
+  1374 00000A95 EB14                      jmp excHandler
+  1375                                  
+  1376                                  excHandler14:
+  1377 00000A97 6A0E                      push 14
+  1378 00000A99 EB10                      jmp excHandler
+  1379                                  
+  1380                                  excHandler16:
+  1381 00000A9B 6A10                      push 16
+  1382 00000A9D EB0C                      jmp excHandler
+  1383                                  
+  1384                                  excHandler17:
+  1385 00000A9F 6A11                      push 17
+  1386 00000AA1 EB08                      jmp excHandler
+  1387                                  
+  1388                                  excHandler18:
+  1389 00000AA3 6A12                      push 18
+  1390 00000AA5 EB04                      jmp excHandler
+  1391                                  
+  1392                                  excHandler19:
+  1393 00000AA7 6A13                      push 19
+  1394 00000AA9 EB00                      jmp excHandler
+  1395                                  
+  1396                                  excHandler: ; handler general de la excepcion --> aca pinto toda la pantalla de azul por ejemplo, muestro un mensaje de error y numero de excepcion
+  1397 00000AAB FA                          cli
+  1398                                  
+  1399 00000AAC 6658                        pop eax         ; saco número excepción (vector) de la pila
+  1400 00000AAE 88C3                        mov bl, al      ; guardo en bl
+  1401                                      
+  1402                                      ; Primero pinto toda la pantalla de azul: usare el selector de video, pero recordar que ya lo habia cargado de antes en es
+  1403 00000AB0 B9D007                      mov cx, 80*25 ;cargo cantidad de puntos en pantalla a pintar
+  1404 00000AB3 66BF00000000                mov edi, 0x00 ;cargo edi en 0 porque ahora tambien borrare los caracteres, por lo tanto me movere por todos los bytes de la pantalla
+  1405 00000AB9 66BA00000000                mov edx, 0x00
+  1406                                      
+  1407                                      bucle_pantalla_2: ; pinta toda la pantalla de azul
+  1408 00000ABF B000                          mov al, 0x00     ;poniendo el byte de caracter todo en 0 borra el caracter
+  1409 00000AC1 26678807                      mov [es:edi], al ;borro caracter 
+  1410 00000AC5 6647                          inc edi          ;incremento edi para pasar al atributo
+  1411 00000AC7 B011                          mov al, COLOR_BG_EXCEPTION     ;cargo valor del atributo para poner cada caracter en azul y fondo en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
+  1412 00000AC9 26678807                      mov [es:edi], al 
+  1413 00000ACD 6647                          inc edi          ;incremento edi para pasar al otro caracter
+  1414                                        ;ciclo hasta terminar de recorrer el buffer de video
+  1415 00000ACF E2EE                        loop bucle_pantalla_2 ; loop usa al registro cx: decrementa cx. Si cx vale mas que 0, salta a la etiqueta indicada
+  1416                                      
+  1417 00000AD1 6631FF                      xor edi, edi ; vuelvo a poner el offset en 0, para escribir en el primer caracter
+  1418 00000AD4 6631C0                      xor eax, eax ; vuelvo a poner en 0 eax
+  1419                                      
+  1420                                      ;Ahora muestro mensaje de "error"
+  1421                                      printLoop:
+  1422 00000AD7 3E678A82[1E000000]            mov al, BYTE [ds:msgException+edx] ; Lee un caracter del string
+  1423 00000ADF 3C00                          cmp al, 0                    ; Si es 0 (Null) termina (End Of String)
+  1424 00000AE1 7412                          je finMensaje
+  1425 00000AE3 6642                          inc edx                      ; Incremento puntero string
+  1426 00000AE5 26678807                      mov [es:edi], al             ; Imprimo el caracter que esta almacenado en al
+  1427 00000AE9 6647                          inc edi                      ; Incremento el puntero (Color (atributo) del caracter)
+  1428 00000AEB B017                          mov al, 0x17                 ; Cargo valor del atributo para poner cada caracter en azul y fondo en azul --> 0x11 = 0 001 | 0 001 (R=0, G=0, B=1)
+  1429 00000AED 26678807                      mov [es:edi], al
+  1430 00000AF1 6647                          inc edi                      ; Incremento el puntero (Siguiente caracter)
+  1431 00000AF3 EBE2                          jmp printLoop; vuelvo a el inicio de la etiqueta loop
+  1432                                      finMensaje: ;Imprimo numero de excepcion
+  1433 00000AF5 80C330                        add bl, '0'     ; convierto a ASCII
+  1434 00000AF8 2667881F                      mov [es:edi], bl
+  1435 00000AFC 6647                          inc edi
+  1436 00000AFE B017                          mov al, 0x17
+  1437 00000B00 26678807                      mov [es:edi], al
+  1438 00000B04 6647                          inc edi
+  1439 00000B06 EBFE                          jmp $
+  1440 00000B08 FB                            sti
+  1441                                  fin:            
+  1442                                  
+  1443                                  ; 100h mas adelante configuro el ESP de la pila. 
+  1444                                   
+  1445                                  ;------------------------------------------
+  1446                                  ; ESPACIOS PARA PILAS Y SEGMENTOS DE DATOS
+  1447                                  ;------------------------------------------
+  1448                                  stackTaskInit_Lvl0:   ; pila de tarea inicial
+  1449 00000B09 <res 00000100>          resb 100h
+  1449          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1450                                  
+  1451                                  stackSch_Lvl0:            ; irq0
+  1452 00000C09 <res 00000100>          resb 100h
+  1452          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1453                                  
+  1454                                  stackSerialPort_Lvl0:         ; Tarea Puerto Serie
+  1455 00000D09 <res 00000100>          resb 100h
+  1455          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1456                                  
+  1457                                  stackTask1_Lvl0:         ; Tarea Print Pantalla (Anillo 3 // call gate accede a Anillo 0)
+  1458 00000E09 <res 00000100>          resb 100h
+  1458          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1459                                  
+  1460                                  stackTask2_Lvl0:         ; Tarea Print Pantalla (Anillo 3 // call gate accede a Anillo 0)
+  1461 00000F09 <res 00000100>          resb 100h
+  1461          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1462                                  
+  1463                                  ;Segmento de datos Anillo 3
+  1464                                  data_anillo3:
+  1465 00001009 <res 00000100>          resb 100h
+  1465          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1466                                  
+  1467                                  ;Pila Tarea 1 Anillo 3
+  1468                                  stackTask1_Lvl3:
+  1469 00001109 <res 00000100>          resb 100h
+  1469          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
+  1470                                  
+  1471                                  ;Pila Tarea 1 Anillo 3
+  1472                                  stackTask2_Lvl3:
+  1473 00001209 <res 00000100>          resb 100h
+  1473          ******************       warning: uninitialized space declared in .text section: zeroing [-w+other]
