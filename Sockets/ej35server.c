@@ -30,6 +30,10 @@
 #define PORTUDPINICIAL 10000
 #define MAXBUFLEN 100  // Max. cantidad de bytes que podra recibir 
 
+void handlerChild(int val); // Prototipo de la funcion handler linkeada a señal SIGCHLD
+
+int child_count = 0;    // Contador de procesos hijos, para saber si ya no hay ninguno activo
+
 int main()
 {		
 	// Variables para chequear finalizacion de proceso Padre
@@ -37,7 +41,6 @@ int main()
 	Se usa para indicar qué sockets quiero vigilar para lectura */
 	fd_set readfdsPadre; 
     struct timeval timeoutPadre;
-    int child_count = 0;    // Contador de procesos hijos, para saber si ya no hay ninguno activo
     int status;            // Esta variable y la siguiente son para una funcion waitpid que verifica el estado de los procesos hijos 
 	pid_t pid;
 
@@ -107,24 +110,16 @@ int main()
 
 	    // Si pasaron 60 segundos sin recibir conexiones, vencio el timeoutPadre, entra aca
 	    else if (activityPadre == 0) 
-	    {
-	        // Como la otra condicion es ver si no hay procesos child activos, veo si el contador de procesos child es 0
-	        /* Uso la siguiente linea: pid_t waitpid(pid_t pid, int *status, int options);
-	        pid: indica qué hijo queremos consultar --> Si es -1 es para cualquier hijo del proceso padre
-			status: variable donde se guarda información sobre cómo terminó el hijo.
-			options: flags que modifican el comportamiento, en este caso --> WNOHANG: si un hijo termino devuelve su pid, sino 0 */
-
-	        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) // 
-	        {
-	            child_count--; // se liberó un hijo
-	        }
-
-	        if (child_count == 0) {
-	            printf("Servidor: 1 minuto sin conexiones ni hijos activos. Terminando...\n");
-	            break; // salir del bucle principal
-	        }
-
-	        // Si hay hijos activos, seguimos esperando
+	    {	
+	    	printf("Servidor: 1 minuto sin conexiones ... esperando que no queden hijos activos...\n");
+        	// cargo handler que se linkea con la señal SIGCHLD que enviaran los hijos al terminar
+			signal(SIGCHLD, handlerChild);
+			// El padre se queda aca hasta que todos los procesos hijos finalicen, ahi child_count sera = 0
+         	while (child_count>0) 
+  				sleep(5);
+			printf("Ya no hay procesos hijos activos ... cerrando servidor y finalizando proceso...\n");
+			close(sockfdTCP);
+			return 0; // Aca finaliza el proceso padre
 	    }
 
 	    // Si llegó una nueva conexión TCP
@@ -143,9 +138,10 @@ int main()
 	        numeroCliente++; //Para asignar un numero de cliente a cada conexion gestionada por los hijos, lo hago en el padre para que cada hijo reciba la copia
 	                         //con un numero mas
 	        //Veo si hubo mas de 10 conexiones
-	        if (numeroCliente > 10) //Si hubo mas de 10, cierro la que se acepto
+	        if (numeroCliente > BACKLOG) //Si hubo mas de 10, cierro la que se acepto
 	        {
-	        	close(sockfdTCP);
+				printf ("No se pueden aceptar mas conexiones, cerrando ...\n");
+	        	close(newfdTCP);
 	        }
 	        else if (!fork()) //Si no, creo proceso hijo con la conexion entrante
 	        {	// Aca comienza el proceso hijo 
@@ -253,4 +249,14 @@ int main()
 	// Si sali del while(1) que acepta conexiones TCP debido al timeout de 1 minuto y ya sin hijos activos, cierro el socketTCP que abrio el padre
 	close(sockfdTCP);
 	printf("Servidor apagado correctamente.\n");
+}
+
+//Handler linkeado a SIGCHLD para decrementar contador de procesos hijos
+void handlerChild(int val)
+{
+	// espero la señal SIGCHLD de cualquier hijo
+	wait(0);
+	printf("Finaliza el hijo %d",val);
+	// decremento cantidad de hijos
+	child_count--;
 }
