@@ -1,0 +1,4 @@
+Ejecución en forma concurrente. Limita inicialmente a 10 instancias child.
+Espera conexiones por el port TCP 5024. Cuando se reciba una conexión cree un child. Cada instancia child buscará un port local UDP libre a partir del port 10000. Cuando lo encuentra lo informa al cliente por el port TCP heredado, y queda esperando información por el port UDP. La información que recibirá por dicho puerto UDP, serán logs remotos, y cada child deberá presentar la pantalla la información recibida.
+Condición de finalización de los procesos child: El proceso child debe recibir cada 30 segundos por el port UDP mencionado algún dato. Transcurridos 2 minutos sin recibir mensajes, cierra el socket UDP y termina su ejecución. Usar función select con timeout para este fin.
+Condición de finalización del proceso principal: 1 minuto sin child activo y sin pedidos de conexión entrantes (las dos condiciones). Usar función select.
